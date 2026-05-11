@@ -11,7 +11,7 @@ def _build_stub_answer(*, question: str, hits: list[SearchHit]) -> str:
     """Temporary answer until LLM is wired (`app.chat.service` / dedicated LLM client)."""
     if not hits:
         return (
-            "검색 결과가 없습니다. (OpenSearch·LLM 미연동 PoC: DB `document_chunk` 검색만 사용합니다.)\n"
+            "검색 결과가 없습니다. (실제 LLM은 아직 연결되지 않았습니다.)\n"
             "질문에 포함된 단어가 본문에 있는지, 또는 PUBLIC/부서/소유자 권한이 맞는지 확인해 보세요."
         )
     lines = [
@@ -64,8 +64,14 @@ class ChatService:
                 page_no=h.page_no,
                 score=h.score,
                 access_scope=h.access_scope,
+                highlights=h.highlights,
             )
             for h in hits
         ]
         answer = _build_stub_answer(question=body.question, hits=hits)
-        return ChatQueryResponse(answer=answer, sources=sources, session_id=body.session_id)
+        return ChatQueryResponse(
+            answer=answer,
+            search_backend=self._settings.search_backend,
+            sources=sources,
+            session_id=body.session_id,
+        )

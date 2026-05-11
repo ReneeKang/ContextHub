@@ -129,6 +129,20 @@ uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 - Chat API: `http://127.0.0.1:8000/api/v1/chat/...`
 - Admin API: `http://127.0.0.1:8000/api/v1/admin/...`
 
+#### Chat 검색 품질 확인 (`POST /api/v1/chat/query`)
+
+응답 JSON의 **`search_backend`** 로 이번 요청이 **`db`**(PostgreSQL ILIKE)인지 **`opensearch`**(HTTP BM25·하이라이트)인지 구분할 수 있습니다. **`sources`** 각 항목의 **`score`**·**`highlights`** 는 OpenSearch 경로에서 의미가 있습니다(DB는 `score=1.0` 플레이스홀더, `highlights` 는 보통 `null`). 백엔드 이름은 **`answer` 본문에 넣지 않고** 위 필드만 보시면 됩니다.
+
+`SEARCH_BACKEND=opensearch` 이고 색인이 끝난 뒤, Swagger에서 아래 **예시 질의**로 검색 품질을 시험해 볼 수 있습니다(`question` 필드).
+
+| 예시 질의 (문자열 그대로) |
+|---------------------------|
+| `Kubeflow 워크플로우` |
+| `Feature 형상관리` |
+| `cen.dir.go.kr` |
+
+문서 본문·메타에 해당 표현이 없으면 히트가 0건일 수 있습니다. 그 경우에도 응답에는 **`search_backend`** 가 포함됩니다.
+
 ### 5. 워커 (별도 터미널)
 
 API와 **별도 진입점**입니다. 한 번 실행 시 단계별로 **각 서비스의 `run_once`만** 순서대로 호출합니다.

@@ -4,6 +4,8 @@ from uuid import UUID
 
 from pydantic import BaseModel, Field
 
+from app.config.settings import SearchBackendLiteral
+
 
 class ChatQueryRequest(BaseModel):
     question: str
@@ -28,11 +30,24 @@ class ChatSourceItem(BaseModel):
     chunk_no: int
     section_title: str | None = None
     page_no: int | None = None
-    score: float
+    score: float = Field(
+        ...,
+        description="OpenSearch: `_score` (BM25). DB backend: placeholder `1.0` (no ranking).",
+    )
     access_scope: str
+    highlights: dict[str, list[str]] | None = Field(
+        default=None,
+        description="OpenSearch highlight fragments per field when enabled; omitted/null for DB or stub.",
+    )
 
 
 class ChatQueryResponse(BaseModel):
     answer: str
+    search_backend: SearchBackendLiteral = Field(
+        description=(
+            "Retrieval backend for this request: `db` = PostgreSQL ILIKE; "
+            "`opensearch_stub` = query validation only (no hits); `opensearch` = HTTP cluster (BM25, optional highlights)."
+        ),
+    )
     sources: list[ChatSourceItem]
     session_id: str | None = None
