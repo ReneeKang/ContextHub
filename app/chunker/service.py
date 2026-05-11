@@ -6,7 +6,11 @@ from dataclasses import dataclass
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from app.chunker.markdown_chunk import build_chunks_from_markdown
+from app.chunker.markdown_chunk import (
+    build_chunks_from_markdown,
+    chunk_metadata_for_piece,
+    estimate_token_count,
+)
 from app.config.settings import Settings
 from app.db.enums import ChunkIndexStatus, ChunkStatus, IngestStatus, ParseStatus
 from app.db.models.document_chunk import DocumentChunk
@@ -138,14 +142,21 @@ class ChunkerService:
                 stats.failed += 1
                 continue
 
+            meta = chunk_metadata_for_piece()
             for i, piece in enumerate(pieces, start=1):
+                text = piece.text
+                char_n = len(text)
                 self._session.add(
                     DocumentChunk(
                         raw_document_id=doc.raw_document_id,
                         chunk_no=i,
                         section_title=piece.section_title,
-                        page_no=None,
-                        chunk_text=piece.text,
+                        page_no=piece.source_page,
+                        heading_path=piece.heading_path,
+                        chunk_text=text,
+                        chunk_char_count=char_n,
+                        chunk_token_estimate=estimate_token_count(text),
+                        chunk_metadata_json=meta,
                         access_scope=doc.access_scope,
                         owner_id=doc.owner_id,
                         department_code=doc.department_code,

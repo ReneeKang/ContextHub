@@ -63,6 +63,23 @@ python -m app.db.init_db
 
 구현은 `app/db/init_db.py`의 `create_all` 경로입니다.
 
+### 3a. 기존 DB: `document_chunk` 확장 컬럼 (개발 전용)
+
+이미 `init_db` 로 스키마가 잡혀 있는데 **청킹 메타 컬럼만** 빠진 경우(예: 이전 클론 DB), PostgreSQL에 한해 **비파괴 `ALTER TABLE … ADD COLUMN IF NOT EXISTS`** 만 수행합니다. **운영·Alembic 대체용이 아님** (`app/db/dev_migrations.py` 주석 참고).
+
+```bash
+python -m app.db.dev_migrations
+```
+
+- 컬럼이 이미 있으면 해당 문은 건너뜁니다.
+- 실패 시 stderr 로그에 **어느 단계(label)** 에서 실패했는지 남깁니다.
+
+**이후 파이프라인(기존 문서를 새 청크 규칙으로 다시 쌓을 때)**:
+
+1. `python -m app.db.dev_migrations` (위)
+2. Admin **`POST /api/v1/admin/documents/{raw_document_id}/reprocess`** — body `{"stage":"chunk"}` (대상 문서마다, 또는 신규만)
+3. **`python -m app.workers`** 로 청커·인덱서 등 실행
+
 ### 4. API 서버 (chat-api + admin-api)
 
 ```bash
@@ -93,9 +110,35 @@ python -m app.workers
 **로컬 NAS 샘플**: `local_nas/chatbot_docs/public/sample.txt`  
 스캐너는 `docs/pipeline-flow.md` 에 맞게 **mtime+size 가 연속 두 번 동일할 때만** `raw_document` 를 등록합니다. 첫 실행에서 안정화 대기만 보이면, 파일을 바꾸지 않은 채 **`python -m app.workers` 를 한 번 더** 실행해 보세요.
 
+### 지원 문서 포맷 (파서)
+
+워커의 파서는 **`RoutingParser`** (`app/adapters/parsers/routing.py`)가 MIME(파일명 추정) 또는 확장자로 어댑터를 고릅니다.
+
+| 포맷 | 상태 | 엔진 | 비고 |
+|------|------|------|------|
+| `.txt` / `.md` | 지원 | `stub-text` | UTF-8 디코드, 줄 단위 블록 |
+| `.pdf` | 지원 | `pypdf` | 텍스트 추출만, **OCR 없음** |
+| `.docx` | 지원 | `python-docx` | 문단 + 스타일 기반 제목(`Heading n`, `Title`) → 마크다운 헤딩 |
+| `.hwp` / `.hwpx` | 예정 | placeholder | 파싱 시도 시 **명시적 오류**(향후 kordoc 등 별도 연동) |
+| 스캔 PDF·표·이미지 본문 | 미지원 | — | 빈 페이지 섹션 가능; OCR/레이아웃 복원은 범위 밖 |
+
+`document_parse_result.parser_name`에는 실제 엔진 이름(`stub-text`, `pypdf`, `python-docx` 등)이 저장되고, 어댑터가 비우면 `PARSER_NAME` 기본값(`routing`)이 쓰입니다.
+
+추가 샘플 파일과 테스트 순서는 **`sample_docs/README.md`** 를 참고하세요.
+
 **파이프라인 순서**: 스캔 → 파서(`parse_status=DONE`) → 청커(`document_chunk` 생성, `chunk_status=DONE`) → 인덱서(stub: 대기 건만 로그).
 
 청커는 **`parse_status=DONE`** 인 문서만 처리합니다. 로그에 `documents waiting on parser …` 가 나오면 파서 워커를 먼저 통과시키세요. 청킹 본문은 `app/chunker/service.py` 와 `markdown_chunk.py` 를 참고하면 됩니다.
+
+### 청킹 전략 (요약)
+
+- **설계·트레이드오프**: `docs/chunking-strategy.md` (문단 / 헤딩 / 페이지 / 슬라이딩 윈도우 / overlap 비교).
+- **구현**: 마크다운 ATX 헤딩으로 1차 분리 → 선두 헤딩 체인으로 **`heading_path`**·**`section_title`**·PDF **`Page N` → `page_no`** → 길이 초과 시 **가변 경계 슬라이딩**(`CHUNK_MAX_CHARS` / `CHUNK_OVERLAP`) → 동일 섹션에서 **짧은 청크 병합**.
+- **메타**: `document_chunk`에 `chunk_char_count`, `chunk_token_estimate`(문자/4 휴리스틱), `chunk_metadata_json`(청킹 버전 등). 인덱스 스텁 바디에도 동일 키를 넣어 향후 벡터 필드와 합치기 쉽게 유지.
+- **운영 확인**: `GET /api/v1/admin/documents/{raw_document_id}` 응답의 **`chunks`** 배열(미리보기 텍스트·크기·`section_title`·`heading_path`·`source_page`).
+- **기존 PostgreSQL DB**에 이미 `document_chunk` 가 있는 경우 `create_all`만으로는 새 컬럼이 생기지 않습니다. **`python -m app.db.dev_migrations`**(§3a) 또는 수동 SQL은 **`docs/chunking-strategy.md` §5** 를 참고하세요.
+
+스키마 스냅샷은 `docs/db-schema.md` 의 `document_chunk` 절을 참고합니다.
 
 ### 6. Chat 권한 필터 검증 (샘플 NAS)
 
@@ -113,7 +156,7 @@ python -m app.workers
 
 1. 저장소 루트에서 **`python -m app.workers` 를 2회 이상** 실행해 새 파일이 스캔·안정화·파싱·청킹·색인까지 반영합니다. (스캐너는 mtime/size 안정화 규칙을 따릅니다.)
 2. **`GET /api/v1/admin/documents`** 로 `ingest_status=RECEIVED` 등으로 문서 3건(+기존 샘플)이 보이는지 확인합니다.
-3. **`POST /api/v1/chat/query`** 로 질문합니다. (DB `document_chunk` 검색: 공백으로 나눈 **모든** 토큰이 `chunk_text` 또는 `section_title`에 포함되어야 AND 매칭)
+3. **`POST /api/v1/chat/query`** 로 질문합니다. (DB `document_chunk` 검색: 공백으로 나눈 **모든** 토큰이 `chunk_text`, `section_title`, **`heading_path`** 중 하나에 포함되어야 AND 매칭)
 
 **관리자 재처리·검색 제외 (Swagger `/docs`)**
 
@@ -165,13 +208,13 @@ Swagger에서 **admin** 태그 아래 위 엔드포인트를 펼치고 **Try it 
 | `SEARCH_INDEX_NAME` | OpenSearch 인덱스 논리 이름 (`contexthub_chunks`) |
 | `SEARCH_BACKEND` | `db`(기본) 또는 `opensearch_stub`(로그만; 클러스터 없음) |
 | `OPENSEARCH_BASE_URL` | 실제 연동 시 예: `https://localhost:9200` (현재 스텁 경로에서는 미사용) |
-| `PARSER_NAME` / `PARSER_VERSION` | 파싱 결과 메타 |
+| `PARSER_NAME` / `PARSER_VERSION` | DB에 쓸 파서 이름 폴백(기본 `routing`) / 버전 폴백; 포맷별 어댑터가 `parser_name`·`parser_version`을 넣으면 그 값이 우선 |
 
 ## 외부 연동
 
-- **kordoc**: `app.adapters.kordoc_stub` — 실제 연동 시 동일 `ParserClient` 프로토콜 구현체로 교체
+- **파서**: `app.adapters.parsers.RoutingParser` + `ParserClient` 구현체(`pypdf`, `python-docx`, `stub-text` 등). **kordoc 실연동은 아직 없음**; 과거 import 경로 `KordocStubParser`는 `stub-text`와 동일(`app/adapters/kordoc_stub.py`).
 - **OpenSearch / LLM**: `app.adapters.search_stub` 및 `app.chat.service` 내 TODO 참고
 
 ## DB 마이그레이션
 
-이 저장소 단계에서는 **Alembic 없음**. 로컬은 `python -m app.db.init_db`만 사용하고, 스키마가 안정되면 Alembic 등 마이그레이션을 별도 단계에서 추가합니다.
+이 저장소 단계에서는 **Alembic 없음**. 로컬은 `python -m app.db.init_db`로 최초 테이블 생성하고, 이미 만든 DB에 **컬럼만 덧붙일 때**는 개발용 `python -m app.db.dev_migrations`(PostgreSQL, 비파괴)를 쓸 수 있습니다. 스키마가 안정되면 Alembic 등으로 이전하는 것이 좋습니다.

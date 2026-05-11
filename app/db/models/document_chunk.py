@@ -2,11 +2,12 @@ from __future__ import annotations
 
 import uuid
 from datetime import datetime
+from typing import Any
 
 import sqlalchemy as sa
 from sqlalchemy import Enum as SAEnum
-from sqlalchemy import ForeignKey, Index, String, Text, text
-from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy import ForeignKey, Index, Integer, String, Text, text
+from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import Base
@@ -29,8 +30,14 @@ class DocumentChunk(Base):
 
     chunk_no: Mapped[int] = mapped_column(nullable=False)
     section_title: Mapped[str | None] = mapped_column(Text, nullable=True)
+    #: Logical source page (e.g. PDF); mirrors index `page_no` / search filters.
     page_no: Mapped[int | None] = mapped_column(nullable=True)
     chunk_text: Mapped[str] = mapped_column(Text, nullable=False)
+
+    heading_path: Mapped[str | None] = mapped_column(Text, nullable=True)
+    chunk_char_count: Mapped[int] = mapped_column(Integer, nullable=False, server_default=sa.text("0"))
+    chunk_token_estimate: Mapped[int] = mapped_column(Integer, nullable=False, server_default=sa.text("0"))
+    chunk_metadata_json: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)
 
     access_scope: Mapped[AccessScope] = mapped_column(
         SAEnum(AccessScope, native_enum=False, length=20),

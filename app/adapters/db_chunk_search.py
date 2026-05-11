@@ -86,6 +86,7 @@ class DbChunkSearchClient(SearchClient):
                 or_(
                     DocumentChunk.chunk_text.ilike(pat, escape="\\"),
                     DocumentChunk.section_title.ilike(pat, escape="\\"),
+                    DocumentChunk.heading_path.ilike(pat, escape="\\"),
                 )
             )
         text_clause = and_(*text_predicates) if text_predicates else false()

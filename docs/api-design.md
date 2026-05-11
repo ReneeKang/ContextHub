@@ -142,6 +142,7 @@ Base URL: /api/v1/admin
   "raw_document_id": "uuid-...",
   "original_filename": "보안정책_v2.pdf",
   "stored_path": "/nas/chatbot_docs/public/보안정책_v2.pdf",
+  "inbox_path": "public/보안정책_v2.pdf",
   "file_ext": "pdf",
   "file_size": 204800,
   "sha256_hash": "abc123...",
@@ -152,11 +153,27 @@ Base URL: /api/v1/admin
   "index_status": "FAILED",
   "chunk_count": 14,
   "indexed_chunk_count": 0,
+  "has_parse_result": true,
+  "parse_result": { "exists": true, "parser_name": "pypdf", "parser_version": "pypdf-5.x", "markdown_char_count": 12000, "parsed_at": "2026-05-11T10:01:00Z" },
+  "index_history": { "total_records": 14, "done_records": 0, "failed_records": 2 },
+  "chunks": [
+    {
+      "chunk_no": 1,
+      "section_title": "개요",
+      "heading_path": "보안정책 > 개요",
+      "source_page": 1,
+      "chunk_char_count": 980,
+      "chunk_token_estimate": 245,
+      "chunk_text_preview": "본 문서는 …(앞부분만, 길이 제한)"
+    }
+  ],
   "excluded": false,
   "created_at": "2026-05-11T10:00:00Z",
   "updated_at": "2026-05-11T10:05:00Z"
 }
 ```
+
+`chunks` 는 **최대 약 150건**, `chunk_text_preview` 는 전체 `chunk_text` 의 앞부분만 포함한다.
 
 ---
 

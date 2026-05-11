@@ -13,7 +13,7 @@ from typing import Any
 
 from sqlalchemy import text
 
-from app.adapters.kordoc_stub import KordocStubParser
+from app.adapters.parsers import RoutingParser
 from app.adapters.search_backend import search_client_for_indexer
 from app.chunker.service import ChunkerRunStats, ChunkerService
 from app.config.settings import get_settings
@@ -53,7 +53,7 @@ def run_parser_once() -> ParserRunStats:
     factory = get_session_factory()
     session = factory()
     try:
-        stats = ParserService(session, settings, parser=KordocStubParser()).run_once()
+        stats = ParserService(session, settings, parser=RoutingParser()).run_once()
         session.commit()
         return stats
     except Exception:

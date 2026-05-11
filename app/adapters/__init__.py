@@ -1,5 +1,6 @@
 from app.adapters.db_chunk_search import DbChunkSearchClient
 from app.adapters.kordoc_stub import KordocStubParser
+from app.adapters.parsers import RoutingParser
 from app.adapters.opensearch_payload import (
     REQUIRED_CHUNK_INDEX_FIELDS,
     build_delete_by_raw_document_query,
@@ -16,6 +17,7 @@ from app.adapters.search_stub import StubSearchClient
 __all__ = [
     "DbChunkSearchClient",
     "KordocStubParser",
+    "RoutingParser",
     "OpenSearchSearchClient",
     "REQUIRED_CHUNK_INDEX_FIELDS",
     "ParseRequest",

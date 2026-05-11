@@ -171,9 +171,13 @@ CREATE TABLE document_chunk (
     raw_document_id UUID         NOT NULL REFERENCES raw_document(raw_document_id),
 
     chunk_no        INTEGER      NOT NULL,   -- 문서 내 순서
-    section_title   TEXT,                   -- 해당 청크의 섹션 제목
-    page_no         INTEGER,                -- 시작 페이지
+    section_title   TEXT,                   -- 리프 섹션 제목(또는 파일명 폴백)
+    heading_path    TEXT,                   -- 계층 경로 e.g. "Chapter 1 > Section A"
+    page_no         INTEGER,                -- 논리 시작 페이지(PDF `Page N` 등)
     chunk_text      TEXT         NOT NULL,
+    chunk_char_count     INTEGER NOT NULL DEFAULT 0,
+    chunk_token_estimate INTEGER NOT NULL DEFAULT 0,
+    chunk_metadata_json  JSONB,           -- 청킹 버전·튜닝 메타(벡터 확장 여지)
 
     -- 권한 메타 (raw_document에서 복사)
     access_scope        VARCHAR(20)  NOT NULL,

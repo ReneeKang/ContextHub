@@ -50,6 +50,18 @@ class IndexHistorySummary(BaseModel):
     failed_records: int
 
 
+class AdminChunkPreviewItem(BaseModel):
+    """Subset of `document_chunk` for operator QA (truncated body)."""
+
+    chunk_no: int
+    section_title: str | None = None
+    heading_path: str | None = None
+    source_page: int | None = Field(default=None, description="Logical start page when known (e.g. PDF)")
+    chunk_char_count: int = Field(description="Character length of full chunk_text")
+    chunk_token_estimate: int = Field(description="Heuristic token count for capacity planning")
+    chunk_text_preview: str = Field(description="Prefix of chunk_text for quick inspection")
+
+
 class AdminDocumentDetailResponse(BaseModel):
     raw_document_id: UUID
     original_filename: str
@@ -68,6 +80,10 @@ class AdminDocumentDetailResponse(BaseModel):
     has_parse_result: bool
     parse_result: ParseResultSummary | None = None
     index_history: IndexHistorySummary | None = None
+    chunks: list[AdminChunkPreviewItem] = Field(
+        default_factory=list,
+        description="First N chunks ordered by chunk_no (preview only)",
+    )
     excluded: bool
     created_at: datetime
     updated_at: datetime

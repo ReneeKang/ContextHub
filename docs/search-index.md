@@ -46,6 +46,20 @@ contexthub_chunks
       "page_no": {
         "type": "integer"
       },
+      "heading_path": {
+        "type": "text",
+        "analyzer": "nori"
+      },
+      "chunk_char_count": {
+        "type": "integer"
+      },
+      "chunk_token_estimate": {
+        "type": "integer"
+      },
+      "chunk_metadata_json": {
+        "type": "object",
+        "enabled": true
+      },
       "chunk_text": {
         "type": "text",
         "analyzer": "nori"

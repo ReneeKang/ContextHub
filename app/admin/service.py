@@ -7,6 +7,7 @@ from sqlalchemy import case, delete, exists, func, or_, select, update
 from sqlalchemy.orm import Session
 
 from app.admin.schemas import (
+    AdminChunkPreviewItem,
     AdminDocumentDetailResponse,
     AdminDocumentListItem,
     AdminDocumentListResponse,
@@ -35,6 +36,9 @@ from app.db.models.document_chunk import DocumentChunk
 from app.db.models.document_index_status import DocumentIndexStatus
 from app.db.models.document_parse_result import DocumentParseResult
 from app.db.models.raw_document import RawDocument
+
+CHUNK_ADMIN_PREVIEW_LIMIT = 150
+CHUNK_TEXT_PREVIEW_CHARS = 480
 
 
 def _enrich_list_aux_counts(
@@ -251,6 +255,35 @@ class AdminService:
 
         idx_hist = _index_history_summary(self._session, raw_document_id)
 
+        chunk_rows = list(
+            self._session.scalars(
+                select(DocumentChunk)
+                .where(DocumentChunk.raw_document_id == raw_document_id)
+                .order_by(DocumentChunk.chunk_no.asc())
+                .limit(CHUNK_ADMIN_PREVIEW_LIMIT)
+            ).all()
+        )
+        chunk_previews: list[AdminChunkPreviewItem] = []
+        for c in chunk_rows:
+            full_text = c.chunk_text or ""
+            char_n = c.chunk_char_count if c.chunk_char_count else len(full_text)
+            tok_n = c.chunk_token_estimate
+            if not tok_n and full_text:
+                tok_n = max(1, (len(full_text) + 3) // 4)
+            elif not full_text:
+                tok_n = 0
+            chunk_previews.append(
+                AdminChunkPreviewItem(
+                    chunk_no=c.chunk_no,
+                    section_title=c.section_title,
+                    heading_path=c.heading_path,
+                    source_page=c.page_no,
+                    chunk_char_count=char_n,
+                    chunk_token_estimate=int(tok_n),
+                    chunk_text_preview=full_text[:CHUNK_TEXT_PREVIEW_CHARS],
+                )
+            )
+
         return AdminDocumentDetailResponse(
             raw_document_id=doc.raw_document_id,
             original_filename=doc.original_filename,
@@ -269,6 +302,7 @@ class AdminService:
             has_parse_result=has_parse,
             parse_result=parse_summary,
             index_history=idx_hist,
+            chunks=chunk_previews,
             excluded=doc.excluded,
             created_at=doc.created_at,
             updated_at=doc.updated_at,

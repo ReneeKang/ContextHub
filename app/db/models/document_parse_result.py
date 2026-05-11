@@ -27,7 +27,7 @@ class DocumentParseResult(Base):
         unique=True,
     )
 
-    parser_name: Mapped[str] = mapped_column(String(100), default="kordoc", nullable=False)
+    parser_name: Mapped[str] = mapped_column(String(100), default="routing", nullable=False)
     parser_version: Mapped[str] = mapped_column(String(50), nullable=False)
 
     markdown_text: Mapped[str] = mapped_column(Text, nullable=False)

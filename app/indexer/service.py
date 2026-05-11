@@ -32,6 +32,14 @@ class IndexerRunStats:
 def _chunk_source_document(chunk: DocumentChunk, raw: RawDocument) -> dict[str, Any]:
     """Payload aligned with `docs/search-index.md` (stub/OpenSearch field names)."""
     created: datetime | None = chunk.created_at
+    meta = chunk.chunk_metadata_json if isinstance(chunk.chunk_metadata_json, dict) else None
+    tx = chunk.chunk_text or ""
+    char_n = chunk.chunk_char_count if chunk.chunk_char_count else len(tx)
+    tok_n = chunk.chunk_token_estimate
+    if not tok_n and tx:
+        tok_n = max(1, (len(tx) + 3) // 4)
+    elif not tx:
+        tok_n = 0
     return {
         "chunk_id": str(chunk.chunk_id),
         "raw_document_id": str(chunk.raw_document_id),
@@ -39,8 +47,12 @@ def _chunk_source_document(chunk: DocumentChunk, raw: RawDocument) -> dict[str, 
         "file_ext": raw.file_ext,
         "chunk_no": chunk.chunk_no,
         "section_title": chunk.section_title,
+        "heading_path": chunk.heading_path,
         "page_no": chunk.page_no,
         "chunk_text": chunk.chunk_text,
+        "chunk_char_count": char_n,
+        "chunk_token_estimate": int(tok_n or 0),
+        "chunk_metadata_json": meta if meta is not None else {},
         "access_scope": chunk.access_scope.value,
         "owner_id": chunk.owner_id,
         "department_code": chunk.department_code,

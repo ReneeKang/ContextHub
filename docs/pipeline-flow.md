@@ -56,9 +56,8 @@
 │  1. chunk_status = PENDING 문서 조회    │
 │  2. document_parse_result 조회          │
 │  3. markdown_text → 청크 분리           │
-│     - 제목(#, ##, ###) 기준 분리       │
-│     - 초과 시 1000~1500자 단위 추가     │
-│     - overlap 일부 유지                 │
+│     - 헤딩·문단 규칙 (`docs/chunking-strategy.md`) │
+│     - heading_path / page_no / 길이·overlap·짧은 청크 병합 │
 │  4. 각 청크에 권한 메타 복사            │
 │     - access_scope                      │
 │     - owner_id                          │
@@ -74,9 +73,8 @@
 │                                         │
 │  1. index_status = PENDING 청크 조회    │
 │  2. OpenSearch 문서 구성                │
-│     - chunk_text                        │
-│     - section_title                     │
-│     - page_no                           │
+│     - chunk_text, section_title, heading_path │
+│     - page_no, chunk_char_count, chunk_metadata_json │
 │     - access_scope / dept / owner       │
 │  3. OpenSearch 색인 등록                │
 │  4. document_index_status UPDATE        │

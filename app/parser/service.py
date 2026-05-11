@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import mimetypes
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -81,10 +82,13 @@ class ParserService:
                 stats.failed += 1
                 continue
 
+            mime_raw, _ = mimetypes.guess_type(doc.original_filename or "")
+            mime_type = mime_raw.lower() if mime_raw else None
             request = ParseRequest(
                 file_bytes=file_bytes,
                 file_ext=doc.file_ext,
                 original_filename=doc.original_filename,
+                mime_type=mime_type,
             )
             try:
                 result = self._parser.parse(request)
@@ -97,7 +101,7 @@ class ParserService:
             self._session.add(
                 DocumentParseResult(
                     raw_document_id=doc.raw_document_id,
-                    parser_name=self._settings.parser_name,
+                    parser_name=result.parser_name or self._settings.parser_name,
                     parser_version=result.parser_version or self._settings.parser_version,
                     markdown_text=result.markdown_text,
                     blocks_json=result.blocks_json,
@@ -111,7 +115,7 @@ class ParserService:
             log.info(
                 "parsed raw_document_id=%s parser=%s version=%s markdown_chars=%s",
                 doc.raw_document_id,
-                self._settings.parser_name,
+                result.parser_name or self._settings.parser_name,
                 result.parser_version or self._settings.parser_version,
                 len(result.markdown_text),
             )

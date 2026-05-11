@@ -25,7 +25,11 @@ class Settings(BaseSettings):
         alias="OPENSEARCH_BASE_URL",
         description="Reserved for real OpenSearch client (e.g. https://localhost:9200). Unused while stub.",
     )
-    parser_name: str = Field(default="kordoc", alias="PARSER_NAME")
+    parser_name: str = Field(
+        default="routing",
+        alias="PARSER_NAME",
+        description="Fallback parser_name when adapter omits it; per-format engines set their own name.",
+    )
     parser_version: str = Field(default="stub-0.0.0", alias="PARSER_VERSION")
 
 

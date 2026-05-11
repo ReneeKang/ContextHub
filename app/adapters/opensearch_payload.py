@@ -20,8 +20,12 @@ REQUIRED_CHUNK_INDEX_FIELDS: frozenset[str] = frozenset(
         "file_ext",
         "chunk_no",
         "section_title",
+        "heading_path",
         "page_no",
         "chunk_text",
+        "chunk_char_count",
+        "chunk_token_estimate",
+        "chunk_metadata_json",
         "access_scope",
         "owner_id",
         "department_code",
@@ -39,8 +43,12 @@ class OpenSearchChunkDocument(TypedDict, total=False):
     file_ext: str
     chunk_no: int
     section_title: str | None
+    heading_path: str | None
     page_no: int | None
     chunk_text: str
+    chunk_char_count: int
+    chunk_token_estimate: int
+    chunk_metadata_json: dict[str, Any]
     access_scope: str
     owner_id: str | None
     department_code: str | None
@@ -112,7 +120,11 @@ def build_keyword_search_body(
                     {
                         "multi_match": {
                             "query": query,
-                            "fields": ["chunk_text^2", "section_title^3"],
+                            "fields": [
+                                "chunk_text^2",
+                                "section_title^2.5",
+                                "heading_path^1.5",
+                            ],
                             "type": "best_fields",
                         }
                     }
@@ -125,8 +137,11 @@ def build_keyword_search_body(
             "raw_document_id",
             "original_filename",
             "section_title",
+            "heading_path",
             "page_no",
             "chunk_text",
+            "chunk_char_count",
+            "chunk_token_estimate",
             "access_scope",
             "chunk_no",
         ],
