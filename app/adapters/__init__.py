@@ -8,6 +8,7 @@ from app.adapters.opensearch_payload import (
     build_permission_filter_clause,
     validate_chunk_index_document,
 )
+from app.adapters.opensearch_client import OpenSearchHttpClient, bulk_index_chunk_documents
 from app.adapters.opensearch_stub import OpenSearchSearchClient
 from app.adapters.parser_protocol import ParseRequest, ParseResult, ParserClient
 from app.adapters.search_backend import search_client_for_chat, search_client_for_indexer
@@ -18,7 +19,9 @@ __all__ = [
     "DbChunkSearchClient",
     "KordocStubParser",
     "RoutingParser",
+    "OpenSearchHttpClient",
     "OpenSearchSearchClient",
+    "bulk_index_chunk_documents",
     "REQUIRED_CHUNK_INDEX_FIELDS",
     "ParseRequest",
     "ParseResult",

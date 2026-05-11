@@ -18,7 +18,7 @@ pip install -e .
 
 ## 로컬 개발 실행 순서
 
-### 1. PostgreSQL 기동 (Docker Compose)
+### 1. PostgreSQL · OpenSearch 기동 (Docker Compose)
 
 저장소 루트에서:
 
@@ -30,10 +30,23 @@ docker compose up -d
 - **User / password**: `contexthub` / `contexthub`
 - **Port**: 호스트 `5433` → 컨테이너 내부 `5432` (로컬에 이미 PostgreSQL이 `5432`를 쓰는 경우가 많아 Compose는 `5433`으로 노출합니다)
 - **데이터**: 이름 붙은 볼륨 `contexthub_pgdata`
+- **OpenSearch** (선택, 실 검색/색인용): 호스트 **9200** → HTTP (`http://127.0.0.1:9200`). 보안 플러그인은 **비활성**(`plugins.security.disabled=true`) 개발 설정입니다. Linux 호스트에서 컨테이너가 바로 죽으면 `vm.max_map_count` 등 OpenSearch 요구사항을 확인하세요.
 
-첫 기동 후 `pg_isready`가 성공할 때까지 잠시 기다린 뒤 다음 단계로 진행합니다.
+첫 기동 후 `pg_isready`가 성공할 때까지 잠시 기다린 뒤 다음 단계로 진행합니다. OpenSearch는 healthcheck 통과까지 **1분 내외** 걸릴 수 있습니다.
 
 이전에 기동이 실패했다면 `docker compose down` 후 다시 `docker compose up -d` 하세요. 이미 `.env`를 만들었다면 `DATABASE_URL`의 포트가 **5433**인지 확인하세요.
+
+#### OpenSearch 인덱스 생성 (한 번)
+
+`.env`에 `OPENSEARCH_BASE_URL=http://127.0.0.1:9200` 를 넣은 뒤:
+
+```bash
+python -m app.db.opensearch_bootstrap
+```
+
+인덱스 이름은 `SEARCH_INDEX_NAME`(기본 `contexthub_chunks`)입니다. 이미 있으면 **건너뜁니다**. 매핑·분석기는 `docs/search-index.md` 및 `app/adapters/opensearch_index_mapping.py` 를 참고하세요.
+
+실제 HTTP 검색/색인을 쓰려면 같은 `.env`에서 **`SEARCH_BACKEND=opensearch`** 로 바꾼 다음 API·워커를 재시작합니다. 기본값 **`SEARCH_BACKEND=db`** 는 PostgreSQL 폴백을 유지합니다.
 
 ### 2. 환경 변수
 
@@ -161,7 +174,7 @@ python -m app.workers
 **관리자 재처리·검색 제외 (Swagger `/docs`)**
 
 1. **`GET /api/v1/admin/documents/{raw_document_id}`** 로 대상 UUID를 확인합니다 (`GET /api/v1/admin/documents` 목록의 `raw_document_id`).
-2. **`POST /api/v1/admin/documents/{raw_document_id}/exclude`** — body 예: `{"reason":"manual takedown"}` → `excluded=true` 저장, 인덱서용 `SearchClient.delete_chunks_for_document` 호출(스텁은 로그만). 이어서 **`POST /api/v1/chat/query`** 로 같은 문서 키워드를 질의해 **DB 검색 경로에서는 결과에서 빠지는지** 확인합니다 (`SEARCH_BACKEND=db` 기준).
+2. **`POST /api/v1/admin/documents/{raw_document_id}/exclude`** — body 예: `{"reason":"manual takedown"}` → `excluded=true` 저장, `SearchClient.delete_chunks_for_document` 호출(`SEARCH_BACKEND=db` 는 스텁, **`opensearch`** 는 실제 delete-by-query). 이어서 **`POST /api/v1/chat/query`** 로 같은 문서 키워드를 질의해 결과에서 빠지는지 확인합니다 (`SEARCH_BACKEND` 에 맞는 백엔드 기준).
 3. **`POST /api/v1/admin/documents/{raw_document_id}/include`** → 제외 해제 및 청크·문서 `index_status=PENDING` 리셋 후, **`python -m app.workers`** 를 한 번 더 돌려 색인을 복구합니다.
 4. **`POST /api/v1/admin/documents/{raw_document_id}/reprocess`** — body `{"stage":"parse"|"chunk"|"index"}` 로 단계별 DB 파생 데이터 삭제·상태 리셋(정책은 `docs/ops-reprocess.md`) 후 워커를 다시 실행해 파이프라인이 이어지는지 확인합니다. `ingest_status=DUPLICATE` 인 행은 **400** 으로 거절됩니다.
 
@@ -192,11 +205,13 @@ Swagger에서 **admin** 태그 아래 위 엔드포인트를 펼치고 **Try it 
 
 | 단계 | 동작 |
 |------|------|
-| **현재 (기본)** | `SEARCH_BACKEND=db` → 채팅은 **`DbChunkSearchClient`**: `document_chunk` + **SQL 권한 필터** (`app/adapters/db_chunk_search.py`). 인덱서는 **`StubSearchClient`** 로 index/delete no-op (DB만 진실). |
-| **통합 스텁** | `SEARCH_BACKEND=opensearch_stub` → **`OpenSearchSearchClient`**: OpenSearch에 보낼 **쿼리/바디 JSON**을 조립·검증·로그만 하고 **HTTP는 호출하지 않음**. 채팅 `search()`는 빈 결과. |
-| **향후** | 동일 `SearchClient` 프로토콜을 구현한 **HTTP 클라이언트** 클래스를 추가하고, `search_backend.py` / 설정에서 선택. 권한은 **`opensearch_payload.build_permission_filter_clause`** 와 동일한 `bool.filter` 를 쿼리에 포함. **Hybrid** 는 BM25 `must` + `knn`/벡터 `should` + 동일 `filter` (자세한 매핑·단계는 `docs/search-index.md`). |
+| **기본 (폴백)** | `SEARCH_BACKEND=db` → 채팅 **`DbChunkSearchClient`** (`document_chunk` + SQL 권한 필터). 인덱서는 **`StubSearchClient`** (index/delete no-op; DB가 진실). |
+| **통합 스텁** | `SEARCH_BACKEND=opensearch_stub` → **`OpenSearchSearchClient`**: 쿼리/페이로드 검증·로그만, **HTTP 없음**. |
+| **OpenSearch HTTP** | `SEARCH_BACKEND=opensearch` + `OPENSEARCH_BASE_URL` → **`OpenSearchHttpClient`** (`opensearch_client.py`): `index` / `search` / `delete_by_query` 실호출. 권한은 **`opensearch_payload.build_keyword_search_body`** 의 `bool.filter` (앱 레벨에서 결과를 좁히지 않음). |
 
-관련 코드: `app/adapters/search_protocol.py`, `opensearch_payload.py`, `opensearch_stub.py`, `search_backend.py`, `app/chat/deps.py` 의 `get_search_client`.
+관련 코드: `app/adapters/search_protocol.py`, `opensearch_payload.py`, `opensearch_stub.py`, `opensearch_client.py`, `opensearch_index_mapping.py`, `search_backend.py`, `app/chat/deps.py` 의 `get_search_client`.
+
+**Hybrid / 벡터** 는 BM25 `must` + `knn` `should` + 동일 `filter` 로 확장 (미구현, `docs/search-index.md` 참고).
 
 ## 환경 변수 요약
 
@@ -206,14 +221,14 @@ Swagger에서 **admin** 태그 아래 위 엔드포인트를 펼치고 **Try it 
 | `NAS_INBOX_ROOT` | 반입 루트 (절대 경로 또는 **저장소 루트 기준 상대 경로**; 기본 `local_nas/chatbot_docs`) |
 | `SCAN_INTERVAL_SECONDS` | (향후) 스캔/워커 주기 참고용 초 단위 |
 | `SEARCH_INDEX_NAME` | OpenSearch 인덱스 논리 이름 (`contexthub_chunks`) |
-| `SEARCH_BACKEND` | `db`(기본) 또는 `opensearch_stub`(로그만; 클러스터 없음) |
-| `OPENSEARCH_BASE_URL` | 실제 연동 시 예: `https://localhost:9200` (현재 스텁 경로에서는 미사용) |
+| `SEARCH_BACKEND` | `db`(기본) \| `opensearch_stub`(무HTTP) \| `opensearch`(HTTP; 인덱스 부트스트랩 필요) |
+| `OPENSEARCH_BASE_URL` | 예: `http://127.0.0.1:9200` (`SEARCH_BACKEND=opensearch` 일 때 필수) |
 | `PARSER_NAME` / `PARSER_VERSION` | DB에 쓸 파서 이름 폴백(기본 `routing`) / 버전 폴백; 포맷별 어댑터가 `parser_name`·`parser_version`을 넣으면 그 값이 우선 |
 
 ## 외부 연동
 
 - **파서**: `app.adapters.parsers.RoutingParser` + `ParserClient` 구현체(`pypdf`, `python-docx`, `stub-text` 등). **kordoc 실연동은 아직 없음**; 과거 import 경로 `KordocStubParser`는 `stub-text`와 동일(`app/adapters/kordoc_stub.py`).
-- **OpenSearch / LLM**: `app.adapters.search_stub` 및 `app.chat.service` 내 TODO 참고
+- **OpenSearch**: `SEARCH_BACKEND=opensearch` → `app.adapters.opensearch_client.OpenSearchHttpClient`; 인덱스는 `python -m app.db.opensearch_bootstrap`. **LLM** 은 `app.chat.service` 등 TODO 참고.
 
 ## DB 마이그레이션
 

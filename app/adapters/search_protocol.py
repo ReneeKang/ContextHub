@@ -5,14 +5,13 @@ Implementations
 ---------------
 * `DbChunkSearchClient` — PostgreSQL `document_chunk` + SQL permission filter (current chat default).
 * `StubSearchClient` — no-op search; minimal index/delete (worker default unless `SEARCH_BACKEND` changes).
-* `OpenSearchSearchClient` — `opensearch_stub.py`: validates payloads / builds query JSON; **no HTTP** until wired.
+* `OpenSearchSearchClient` — `opensearch_stub.py`: validates payloads / builds query JSON; **no HTTP**.
+* `OpenSearchHttpClient` — `opensearch_client.py`: **HTTP** index/search/delete (`SEARCH_BACKEND=opensearch`).
 
-OpenSearch wiring (later)
--------------------------
-* Add `opensearch-py` (or HTTP) dependency; inject base URL + auth from `Settings`.
-* Indexer: replace `StubSearchClient` with HTTP client implementing the same `SearchClient` protocol.
-* Chat: set `SEARCH_BACKEND` to the HTTP-backed client name when ready; keep `build_permission_filter_clause`
-  from `opensearch_payload.py` aligned with SQL in `DbChunkSearchClient`.
+OpenSearch wiring
+-----------------
+* Configure `OPENSEARCH_BASE_URL` and `SEARCH_BACKEND=opensearch`; run `python -m app.db.opensearch_bootstrap` once.
+* Chat + indexer use the same `SearchClient` protocol; permission filter stays in the query (`opensearch_payload`).
 """
 
 from __future__ import annotations

@@ -1,8 +1,7 @@
 """
 OpenSearch chunk document and query **shapes** shared by indexer and chat adapters.
 
-No HTTP client here — see `opensearch_stub.py` for a non-network `SearchClient` implementation
-and wire `opensearch-py` (or requests) in a future `opensearch_client.py`.
+No HTTP client here — see ``opensearch_stub.py`` (no I/O) and ``opensearch_client.py`` (HTTP ``SearchClient``).
 """
 
 from __future__ import annotations

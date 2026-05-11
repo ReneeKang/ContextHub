@@ -27,7 +27,9 @@ def get_search_client(
     """
     `SEARCH_BACKEND=db` (default): `DbChunkSearchClient` — SQL permission filter.
 
-    `SEARCH_BACKEND=opensearch_stub`: `OpenSearchSearchClient` — logs query JSON; **returns no hits** (no cluster).
+    `SEARCH_BACKEND=opensearch_stub`: stub — logs query JSON; **no HTTP**.
+
+    `SEARCH_BACKEND=opensearch`: `OpenSearchHttpClient` — keyword search with **permission in query filter** (requires ``OPENSEARCH_BASE_URL``).
     """
     return search_client_for_chat(db, settings)
 
@@ -42,8 +44,7 @@ def resolve_stub_principal_for_chat(body: ChatQueryRequest) -> PermissionPrincip
     - DEPT: chunk `department_code` must be in `department_codes`
     - PRIVATE: chunk `owner_id` must equal `user_id` (stub-user)
 
-    When `SEARCH_BACKEND=opensearch_stub`, chat search returns no hits; principal is still logged
-    for future OpenSearch query assembly (`opensearch_payload.build_permission_filter_clause`).
+    When `SEARCH_BACKEND=opensearch`, chat uses OpenSearch HTTP (`opensearch_payload.build_keyword_search_body`).
     """
     if body.test_department_codes:
         codes = tuple(

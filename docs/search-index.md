@@ -90,7 +90,26 @@ contexthub_chunks
 }
 ```
 
-한국어 형태소 분석기 `nori`를 기본으로 사용한다.
+한국어 형태소 분석기 `nori`를 **목표 운영 매핑**으로 둔다 (위 JSON).
+
+---
+
+## 로컬 Docker 기본 인덱스 (`docker compose`)
+
+실제로 `docker compose up` 에 포함된 OpenSearch는 **플러그인 없이** 기동한다. 저장소의 부트스트랩은 다음이 책임진다.
+
+- `python -m app.db.opensearch_bootstrap` — 인덱스가 없을 때만 생성
+- 매핑 본문: `app/adapters/opensearch_index_mapping.py` 의 `chunk_index_create_body()`
+
+텍스트 필드(`chunk_text`, `section_title`, `heading_path`)는 **`standard` + `lowercase` 커스텀 분석기**를 쓴다 (의존성 없음). `page_no` 에 대한 검색·표시용 별칭으로 **`source_page`** (`alias` → `page_no`)를 둔다.
+
+### 한국어 (`nori`) 전략 — TODO
+
+1. 클러스터(또는 커스텀 이미지)에 `analysis-nori` 설치: `opensearch-plugin install analysis-nori` (버전 호환 확인).
+2. 인덱스 `settings.analysis` 에 `nori` / `nori_part_of_speech` 등 정의 후, 위 텍스트 필드의 `analyzer` 를 `nori` 기반으로 교체.
+3. 매핑 변경은 **새 인덱스 + reindex** 또는 전량 재색인(`reprocess` + 워커)으로 반영.
+
+임베딩·`dense_vector`·hybrid(BM25 + kNN)는 이 문서 범위 밖(후속 단계).
 
 ---
 
