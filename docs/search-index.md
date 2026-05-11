@@ -273,3 +273,44 @@ PoC에서는 키워드(BM25) 검색만 사용한다.
 - `access_scope`, `owner_id`, `department_code`는 `keyword` 타입 (정확 일치 필터용)
 - `chunk_text`, `section_title`은 `text` + `nori` 분석기 (형태소 분석 검색용)
 - `chunk_id`는 OpenSearch `_id`와 동일하게 설정하여 중복 색인 방지
+
+---
+
+## 앱 코드와의 정렬 (Adapter)
+
+| 구성요소 | 역할 |
+|----------|------|
+| `SearchClient` (`app/adapters/search_protocol.py`) | 인덱서·챗봇이 공유하는 **최소 인터페이스**: `search`, `index_chunk_document`, `delete_chunks_for_document` |
+| `opensearch_payload.py` | 인덱스 bulk `_source` 필드 집합, **권한 `bool.filter` JSON** 조립, 키워드 검색 body 예시, delete-by-query body |
+| `DbChunkSearchClient` | 채팅 기본값: **동일 권한 OR**를 SQL `WHERE`로 구현 (OpenSearch와 결과 정책을 맞추기 위한 참조 구현) |
+| `OpenSearchSearchClient` (`opensearch_stub.py`) | **HTTP 없음**: 위 payload/query **형태만** 검증·로깅. 실제 클러스터 연결 시 이 클래스를 복제해 `opensearch-py` 호출만 채우면 됨 |
+| `search_backend.py` | `Settings.search_backend` 로 `db` / `opensearch_stub` 구현체 선택 |
+
+### Bulk 색인 라인 예시 (ndjson)
+
+`_id` = `chunk_id` (UUID 문자열), `_index` = `contexthub_chunks` (또는 환경별 이름).
+
+```json
+{"index":{"_index":"contexthub_chunks","_id":"550e8400-e29b-41d4-a716-446655440000"}}
+{"chunk_id":"550e8400-e29b-41d4-a716-446655440000","raw_document_id":"...","original_filename":"a.pdf","file_ext":"pdf","chunk_no":1,"section_title":"요약","page_no":1,"chunk_text":"...","access_scope":"PUBLIC","owner_id":null,"department_code":null,"created_at":"2026-05-11T10:00:00Z"}
+```
+
+### 권한 필터 전략 (쿼리 단계)
+
+1. **must / should**: 키워드(`multi_match`) 또는 벡터(`knn`)는 `must` 또는 `should`에 둔다.
+2. **filter (필수)**: `access_scope` / `department_code` / `owner_id` 조합은 **항상 `bool.filter` 안쪽**에만 둔다. (전체 검색 후 애플리케이션에서 제거 금지.)
+3. **PUBLIC | DEPT | PRIVATE** 세 갈래를 `should` + `minimum_should_match: 1` 로 묶은 절을 `filter` 배열의 한 요소로 넣는다 (본 문서 상단 JSON 예시와 동일).
+
+### Hybrid (키워드 + 벡터) 확장 시
+
+| 단계 | 구성 |
+|------|------|
+| Phase 1 | `bool.must`: `multi_match` (BM25 + nori) |
+| Phase 2 | `bool.should`: `script_score` + `dense_vector` 필드 `chunk_embedding` (또는 별도 `knn` 쿼리) |
+| Phase 3 | **RRF** 또는 가중 `dis_max` 로 BM25 점수와 벡터 점수 결합; **권한 `filter` 절은 그대로 유지** |
+
+매핑에 `chunk_embedding` (예: `dense_vector`, `dims=768`) 추가 시, 색인 시 임베딩 API를 호출해 동일 bulk 라인에 필드를 추가한다. 검색 쿼리만 확장하고 **필터 구조는 변경하지 않는다.**
+
+### Docker / 의존성
+
+OpenSearch 컨테이너 및 `opensearch-py`(또는 REST 클라이언트)는 **별 PR**에서 추가한다. 이 문서는 **인덱스·쿼리 계약**만 고정한다.

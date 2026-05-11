@@ -6,7 +6,8 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 
-from app.admin.deps import get_db
+from app.adapters.search_backend import search_client_for_indexer
+from app.admin.deps import get_db, get_settings_dep
 from app.admin.schemas import (
     AdminDocumentDetailResponse,
     AdminDocumentListResponse,
@@ -14,10 +15,12 @@ from app.admin.schemas import (
     AdminStatsResponse,
     ExcludeRequest,
     ExcludeResponse,
+    IncludeResponse,
     ReprocessRequest,
     ReprocessResponse,
 )
 from app.admin.service import AdminService
+from app.config.settings import Settings
 from app.db.enums import (
     AccessScope,
     ChunkStatus,
@@ -79,10 +82,7 @@ def reprocess_document(
     body: ReprocessRequest,
     db: Session = Depends(get_db),
 ) -> ReprocessResponse:
-    result = AdminService(db).reprocess(raw_document_id, body)
-    if result is None:
-        raise HTTPException(status_code=501, detail="Not implemented in PoC skeleton")
-    return result
+    return AdminService(db).reprocess(raw_document_id, body)
 
 
 @router.post("/documents/{raw_document_id}/exclude", response_model=ExcludeResponse)
@@ -90,11 +90,23 @@ def exclude_document(
     raw_document_id: UUID,
     body: ExcludeRequest,
     db: Session = Depends(get_db),
+    settings: Settings = Depends(get_settings_dep),
 ) -> ExcludeResponse:
-    result = AdminService(db).exclude(raw_document_id, body)
-    if result is None:
-        raise HTTPException(status_code=501, detail="Not implemented in PoC skeleton")
-    return result
+    search = search_client_for_indexer(settings)
+    return AdminService(db).exclude(
+        raw_document_id,
+        body,
+        search=search,
+        index_name=settings.search_index_name,
+    )
+
+
+@router.post("/documents/{raw_document_id}/include", response_model=IncludeResponse)
+def include_document(
+    raw_document_id: UUID,
+    db: Session = Depends(get_db),
+) -> IncludeResponse:
+    return AdminService(db).include(raw_document_id)
 
 
 @router.get("/stats", response_model=AdminStatsResponse)

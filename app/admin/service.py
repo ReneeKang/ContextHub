@@ -2,7 +2,8 @@ from __future__ import annotations
 
 from uuid import UUID
 
-from sqlalchemy import case, exists, func, or_, select
+from fastapi import HTTPException
+from sqlalchemy import case, delete, exists, func, or_, select, update
 from sqlalchemy.orm import Session
 
 from app.admin.schemas import (
@@ -14,11 +15,13 @@ from app.admin.schemas import (
     AdminStatsResponse,
     ExcludeRequest,
     ExcludeResponse,
+    IncludeResponse,
     IndexHistorySummary,
     ParseResultSummary,
     ReprocessRequest,
     ReprocessResponse,
 )
+from app.adapters.search_protocol import SearchClient
 from app.db.enums import (
     AccessScope,
     ChunkIndexStatus,
@@ -98,6 +101,16 @@ def _failure_reasons_for_document(
     if has_chunk_index_failed:
         reasons.append("chunk_index")
     return reasons
+
+
+def _delete_index_status_for_raw_document(session: Session, raw_document_id: UUID) -> None:
+    chunk_id_sq = select(DocumentChunk.chunk_id).where(DocumentChunk.raw_document_id == raw_document_id)
+    session.execute(delete(DocumentIndexStatus).where(DocumentIndexStatus.chunk_id.in_(chunk_id_sq)))
+
+
+def _delete_chunks_for_raw_document(session: Session, raw_document_id: UUID) -> None:
+    _delete_index_status_for_raw_document(session, raw_document_id)
+    session.execute(delete(DocumentChunk).where(DocumentChunk.raw_document_id == raw_document_id))
 
 
 def _failed_documents_filter(stage: str | None):
@@ -317,13 +330,77 @@ class AdminService:
 
         return AdminFailedListResponse(total=total, page=page, per_page=per_page, items=items)
 
-    def reprocess(self, raw_document_id: UUID, body: ReprocessRequest) -> ReprocessResponse | None:
-        _ = (raw_document_id, body)
-        return None
+    def reprocess(self, raw_document_id: UUID, body: ReprocessRequest) -> ReprocessResponse:
+        doc = self._session.get(RawDocument, raw_document_id)
+        if doc is None:
+            raise HTTPException(status_code=404, detail="DOCUMENT_NOT_FOUND")
+        if doc.ingest_status == IngestStatus.DUPLICATE:
+            raise HTTPException(
+                status_code=400,
+                detail="REPROCESS_NOT_ALLOWED_FOR_DUPLICATE_INGEST",
+            )
 
-    def exclude(self, raw_document_id: UUID, body: ExcludeRequest) -> ExcludeResponse | None:
-        _ = (raw_document_id, body)
-        return None
+        stage = body.stage
+        if stage == "parse":
+            _delete_chunks_for_raw_document(self._session, raw_document_id)
+            self._session.execute(
+                delete(DocumentParseResult).where(DocumentParseResult.raw_document_id == raw_document_id)
+            )
+            doc.parse_status = ParseStatus.PENDING
+            doc.chunk_status = ChunkStatus.PENDING
+            doc.index_status = DocumentPipelineIndexStatus.PENDING
+        elif stage == "chunk":
+            _delete_chunks_for_raw_document(self._session, raw_document_id)
+            doc.chunk_status = ChunkStatus.PENDING
+            doc.index_status = DocumentPipelineIndexStatus.PENDING
+        elif stage == "index":
+            self._session.execute(
+                update(DocumentChunk)
+                .where(DocumentChunk.raw_document_id == raw_document_id)
+                .values(index_status=ChunkIndexStatus.PENDING)
+            )
+            doc.index_status = DocumentPipelineIndexStatus.PENDING
+        else:
+            raise HTTPException(status_code=400, detail="INVALID_REPROCESS_STAGE")
+
+        self._session.commit()
+        return ReprocessResponse(raw_document_id=raw_document_id, stage=stage, result="scheduled")
+
+    def exclude(
+        self,
+        raw_document_id: UUID,
+        body: ExcludeRequest,
+        *,
+        search: SearchClient,
+        index_name: str,
+    ) -> ExcludeResponse:
+        doc = self._session.get(RawDocument, raw_document_id)
+        if doc is None:
+            raise HTTPException(status_code=404, detail="DOCUMENT_NOT_FOUND")
+
+        doc.excluded = True
+        doc.excluded_reason = body.reason
+        self._session.commit()
+
+        search.delete_chunks_for_document(index_name=index_name, raw_document_id=raw_document_id)
+
+        return ExcludeResponse(raw_document_id=raw_document_id, excluded=True)
+
+    def include(self, raw_document_id: UUID) -> IncludeResponse:
+        doc = self._session.get(RawDocument, raw_document_id)
+        if doc is None:
+            raise HTTPException(status_code=404, detail="DOCUMENT_NOT_FOUND")
+
+        doc.excluded = False
+        doc.excluded_reason = None
+        doc.index_status = DocumentPipelineIndexStatus.PENDING
+        self._session.execute(
+            update(DocumentChunk)
+            .where(DocumentChunk.raw_document_id == raw_document_id)
+            .values(index_status=ChunkIndexStatus.PENDING)
+        )
+        self._session.commit()
+        return IncludeResponse(raw_document_id=raw_document_id, excluded=False)
 
     def stats(self) -> AdminStatsResponse:
         return AdminStatsResponse(

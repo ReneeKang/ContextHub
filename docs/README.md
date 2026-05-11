@@ -66,10 +66,11 @@ NAS 공식 반입 폴더
 | [pipeline-flow.md](pipeline-flow.md) | NAS → 색인 → 챗봇 전체 처리 흐름 |
 | [db-schema.md](db-schema.md) | DB 테이블 스키마 · 상태값 규칙 |
 | [api-design.md](api-design.md) | chat-api · admin-api 엔드포인트 설계 |
-| [permission-policy.md](permission-policy.md) | 경로 기반 권한 정책 · 검색 전 필터 원칙 |
+| [permission-policy.md](permission-policy.md) | 경로 기반 권한 정책 · PermissionPrincipal · 멀티에이전트 확장 방향 |
 | [parser-kordoc.md](parser-kordoc.md) | kordoc 역할 범위 · Parse Worker 연동 구조 |
 | [search-index.md](search-index.md) | 검색 인덱스 설계 · 권한 필터 검색 |
 | [admin-features.md](admin-features.md) | 관리자 최소 기능 요구사항 |
+| [document-versioning.md](document-versioning.md) | 문서 변경 감지 · 버전 전략 · 운영형 RAG 관행 |
 | [poc-scope.md](poc-scope.md) | PoC에서 할 것 / 하지 말아야 할 것 |
 | [todo-roadmap.md](todo-roadmap.md) | 단계별 로드맵 |
 

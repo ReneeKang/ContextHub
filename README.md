@@ -115,13 +115,45 @@ python -m app.workers
 2. **`GET /api/v1/admin/documents`** 로 `ingest_status=RECEIVED` 등으로 문서 3건(+기존 샘플)이 보이는지 확인합니다.
 3. **`POST /api/v1/chat/query`** 로 질문합니다. (DB `document_chunk` 검색: 공백으로 나눈 **모든** 토큰이 `chunk_text` 또는 `section_title`에 포함되어야 AND 매칭)
 
-**기본 stub principal** (`app/chat/deps.py` 의 `get_stub_chat_principal`):
+**관리자 재처리·검색 제외 (Swagger `/docs`)**
+
+1. **`GET /api/v1/admin/documents/{raw_document_id}`** 로 대상 UUID를 확인합니다 (`GET /api/v1/admin/documents` 목록의 `raw_document_id`).
+2. **`POST /api/v1/admin/documents/{raw_document_id}/exclude`** — body 예: `{"reason":"manual takedown"}` → `excluded=true` 저장, 인덱서용 `SearchClient.delete_chunks_for_document` 호출(스텁은 로그만). 이어서 **`POST /api/v1/chat/query`** 로 같은 문서 키워드를 질의해 **DB 검색 경로에서는 결과에서 빠지는지** 확인합니다 (`SEARCH_BACKEND=db` 기준).
+3. **`POST /api/v1/admin/documents/{raw_document_id}/include`** → 제외 해제 및 청크·문서 `index_status=PENDING` 리셋 후, **`python -m app.workers`** 를 한 번 더 돌려 색인을 복구합니다.
+4. **`POST /api/v1/admin/documents/{raw_document_id}/reprocess`** — body `{"stage":"parse"|"chunk"|"index"}` 로 단계별 DB 파생 데이터 삭제·상태 리셋(정책은 `docs/ops-reprocess.md`) 후 워커를 다시 실행해 파이프라인이 이어지는지 확인합니다. `ingest_status=DUPLICATE` 인 행은 **400** 으로 거절됩니다.
+
+Swagger에서 **admin** 태그 아래 위 엔드포인트를 펼치고 **Try it out** → UUID·JSON 입력 → **Execute** 순으로 호출하면 됩니다.
+
+**Stub principal** (`app/chat/deps.py` 의 `resolve_stub_principal_for_chat`): `user_id` 는 고정 `stub-user` 이고, **`department_codes` 는 요청 필드로만 덮어씁니다.**
 
 - **PUBLIC**: 항상 검색 가능 (`public/…`).
-- **DEPT**: 기본값은 `department_codes=()` 이라 **`dept/infra/…` 문서는 검색되지 않음**. `INFRA_SAMPLE_KEYWORD` 만으로는 매칭 문서가 없어야 합니다.
+- **DEPT**: `test_department_codes` 에 해당 부서 코드가 없으면 `department_codes=()` 로 간주되어 **`dept/infra/…` 청크는 SQL 권한 필터에서 제외**됩니다.
 - **PRIVATE**: `owner_id` 가 `stub-user` 인 경로만 가능 → `private/stub-user/…` 의 `PRIVATE_SAMPLE_KEYWORD` 는 매칭됩니다.
 
-DEPT(infra) 문서까지 채팅에서 보고 싶으면 `get_stub_chat_principal` 에서 주석대로 `department_codes=("infra",)` 로 잠시 바꾼 뒤, 질문에 `INFRA_SAMPLE_KEYWORD` 또는 `ContextHub` 를 넣어 다시 호출합니다.
+**DEPT(infra) 검증 (코드 수정 없이 Swagger)** — `POST /api/v1/chat/query` body 예시:
+
+```json
+{
+  "question": "INFRA_SAMPLE_KEYWORD",
+  "top_k": 5,
+  "test_department_codes": ["infra"]
+}
+```
+
+- `test_department_codes` **생략** 또는 `[]` → infra 전용 키워드는 **결과 없음**이 정상입니다.
+- `["infra"]` → `dept/infra/sample-infra.txt` 에서 색인된 청크가 매칭될 수 있습니다.
+
+`test_department_codes` 는 **개발·테스트 전용** 필드입니다. 운영 인증 도입 시 세션/Bearer에서 부서를 채우고 이 필드는 무시·제거하면 됩니다.
+
+### 검색 백엔드 (요약)
+
+| 단계 | 동작 |
+|------|------|
+| **현재 (기본)** | `SEARCH_BACKEND=db` → 채팅은 **`DbChunkSearchClient`**: `document_chunk` + **SQL 권한 필터** (`app/adapters/db_chunk_search.py`). 인덱서는 **`StubSearchClient`** 로 index/delete no-op (DB만 진실). |
+| **통합 스텁** | `SEARCH_BACKEND=opensearch_stub` → **`OpenSearchSearchClient`**: OpenSearch에 보낼 **쿼리/바디 JSON**을 조립·검증·로그만 하고 **HTTP는 호출하지 않음**. 채팅 `search()`는 빈 결과. |
+| **향후** | 동일 `SearchClient` 프로토콜을 구현한 **HTTP 클라이언트** 클래스를 추가하고, `search_backend.py` / 설정에서 선택. 권한은 **`opensearch_payload.build_permission_filter_clause`** 와 동일한 `bool.filter` 를 쿼리에 포함. **Hybrid** 는 BM25 `must` + `knn`/벡터 `should` + 동일 `filter` (자세한 매핑·단계는 `docs/search-index.md`). |
+
+관련 코드: `app/adapters/search_protocol.py`, `opensearch_payload.py`, `opensearch_stub.py`, `search_backend.py`, `app/chat/deps.py` 의 `get_search_client`.
 
 ## 환경 변수 요약
 
@@ -130,7 +162,9 @@ DEPT(infra) 문서까지 채팅에서 보고 싶으면 `get_stub_chat_principal`
 | `DATABASE_URL` | 예: `postgresql+psycopg://contexthub:contexthub@127.0.0.1:5433/contexthub` (Compose 호스트 포트와 일치) |
 | `NAS_INBOX_ROOT` | 반입 루트 (절대 경로 또는 **저장소 루트 기준 상대 경로**; 기본 `local_nas/chatbot_docs`) |
 | `SCAN_INTERVAL_SECONDS` | (향후) 스캔/워커 주기 참고용 초 단위 |
-| `SEARCH_INDEX_NAME` | (향후) OpenSearch 인덱스 이름 |
+| `SEARCH_INDEX_NAME` | OpenSearch 인덱스 논리 이름 (`contexthub_chunks`) |
+| `SEARCH_BACKEND` | `db`(기본) 또는 `opensearch_stub`(로그만; 클러스터 없음) |
+| `OPENSEARCH_BASE_URL` | 실제 연동 시 예: `https://localhost:9200` (현재 스텁 경로에서는 미사용) |
 | `PARSER_NAME` / `PARSER_VERSION` | 파싱 결과 메타 |
 
 ## 외부 연동

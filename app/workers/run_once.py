@@ -14,7 +14,7 @@ from typing import Any
 from sqlalchemy import text
 
 from app.adapters.kordoc_stub import KordocStubParser
-from app.adapters.search_stub import StubSearchClient
+from app.adapters.search_backend import search_client_for_indexer
 from app.chunker.service import ChunkerRunStats, ChunkerService
 from app.config.settings import get_settings
 from app.db.session import get_engine, get_session_factory
@@ -83,7 +83,7 @@ def run_indexer_once() -> IndexerRunStats:
     factory = get_session_factory()
     session = factory()
     try:
-        stats = IndexerService(session, settings, search=StubSearchClient()).run_once()
+        stats = IndexerService(session, settings, search=search_client_for_indexer(settings)).run_once()
         session.commit()
         return stats
     except Exception:

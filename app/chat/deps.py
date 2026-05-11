@@ -5,8 +5,9 @@ from collections.abc import Generator
 from fastapi import Depends
 from sqlalchemy.orm import Session
 
-from app.adapters.db_chunk_search import DbChunkSearchClient
-from app.adapters.search_protocol import PermissionPrincipal
+from app.adapters.search_backend import search_client_for_chat
+from app.adapters.search_protocol import PermissionPrincipal, SearchClient
+from app.chat.schemas import ChatQueryRequest
 from app.config.settings import Settings, get_settings
 from app.db.session import get_db as _get_db
 
@@ -19,26 +20,34 @@ def get_settings_dep() -> Settings:
     return get_settings()
 
 
-def get_search_client(db: Session = Depends(get_db)) -> DbChunkSearchClient:
+def get_search_client(
+    db: Session = Depends(get_db),
+    settings: Settings = Depends(get_settings_dep),
+) -> SearchClient:
     """
-    PoC: PostgreSQL chunk search with SQL permission filter (OpenSearch stand-in).
+    `SEARCH_BACKEND=db` (default): `DbChunkSearchClient` — SQL permission filter.
 
-    Later: switch to OpenSearch-backed client implementing the same `SearchClient` protocol.
+    `SEARCH_BACKEND=opensearch_stub`: `OpenSearchSearchClient` — logs query JSON; **returns no hits** (no cluster).
     """
-    return DbChunkSearchClient(db)
+    return search_client_for_chat(db, settings)
 
 
-def get_stub_chat_principal() -> PermissionPrincipal:
+def resolve_stub_principal_for_chat(body: ChatQueryRequest) -> PermissionPrincipal:
     """
-    PoC fixed principal (no real auth).
+    PoC stub user (no real auth). `user_id` is fixed; `department_codes` come from the request
+    when `test_department_codes` is set (Swagger / local tests only).
 
-    DB search (`DbChunkSearchClient`) applies:
+    Permission rules (when `SEARCH_BACKEND=db`, enforced in SQL via `DbChunkSearchClient`):
     - PUBLIC: always allowed
-    - DEPT: allowed only if `department_codes` contains the chunk's `department_code`
-    - PRIVATE: allowed only if `owner_id` matches `user_id`
+    - DEPT: chunk `department_code` must be in `department_codes`
+    - PRIVATE: chunk `owner_id` must equal `user_id` (stub-user)
 
-    Default `department_codes=()` means DEPT-scoped chunks (e.g. `dept/infra/…`) do **not** appear.
-    To test infra DEPT documents in Swagger, temporarily use e.g.:
-        return PermissionPrincipal(user_id="stub-user", department_codes=("infra",))
+    When `SEARCH_BACKEND=opensearch_stub`, chat search returns no hits; principal is still logged
+    for future OpenSearch query assembly (`opensearch_payload.build_permission_filter_clause`).
     """
+    if body.test_department_codes:
+        codes = tuple(
+            str(c).strip() for c in body.test_department_codes if c is not None and str(c).strip()
+        )
+        return PermissionPrincipal(user_id="stub-user", department_codes=codes)
     return PermissionPrincipal(user_id="stub-user", department_codes=())

@@ -3,7 +3,7 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
-from app.chat.deps import get_db, get_search_client, get_settings_dep, get_stub_chat_principal
+from app.chat.deps import get_db, get_search_client, get_settings_dep, resolve_stub_principal_for_chat
 from app.chat.schemas import ChatQueryRequest, ChatQueryResponse
 from app.chat.service import ChatService
 from app.config.settings import Settings
@@ -17,8 +17,8 @@ def post_chat_query(
     db: Session = Depends(get_db),
     settings: Settings = Depends(get_settings_dep),
     search=Depends(get_search_client),
-    principal=Depends(get_stub_chat_principal),
 ) -> ChatQueryResponse:
+    principal = resolve_stub_principal_for_chat(body)
     service = ChatService(db, settings, search, principal)
     return service.query(body)
 

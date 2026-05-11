@@ -115,6 +115,12 @@ class ExcludeResponse(BaseModel):
     excluded: bool
 
 
+class IncludeResponse(BaseModel):
+    raw_document_id: UUID
+    excluded: bool
+    message: str = "excluded cleared; index stages reset to PENDING for reindex"
+
+
 class AdminStatsResponse(BaseModel):
     total_documents: int
     ingest: dict[str, int]

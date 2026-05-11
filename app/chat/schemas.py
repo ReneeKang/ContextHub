@@ -10,6 +10,16 @@ class ChatQueryRequest(BaseModel):
     top_k: int | None = Field(default=5, ge=1, le=50)
     session_id: str | None = None
 
+    # --- development / Swagger only (not production auth) ---
+    test_department_codes: list[str] | None = Field(
+        default=None,
+        description=(
+            "[DEV/TEST ONLY] If non-empty, used as stub principal `department_codes` for this request "
+            "so DEPT-scoped chunks can be searched without code changes. Omitted = empty tuple (no DEPT access). "
+            "Remove or ignore when Bearer/session auth replaces the stub."
+        ),
+    )
+
 
 class ChatSourceItem(BaseModel):
     chunk_id: UUID

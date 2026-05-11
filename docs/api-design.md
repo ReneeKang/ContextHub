@@ -184,11 +184,13 @@ Base URL: /api/v1/admin
 }
 ```
 
-| stage 값 | 동작 |
+| stage 값 | 동작 (상세·삭제 순서는 `docs/ops-reprocess.md`) |
 |----------|------|
-| `parse` | `parse_status = PENDING`으로 리셋 (이후 chunk, index도 연쇄 리셋) |
-| `chunk` | `chunk_status = PENDING`으로 리셋 (이후 index도 리셋) |
-| `index` | `index_status = PENDING`으로 리셋 |
+| `parse` | `document_index_status` → `document_chunk` → `document_parse_result` 삭제 후 `parse` / `chunk` / `index` 단계 모두 `PENDING` |
+| `chunk` | 인덱스 이력·청크 삭제, 파싱 결과는 유지; `chunk_status`·`index_status` 를 `PENDING` |
+| `index` | 청크 행의 `index_status` 및 문서 집계 `index_status` 를 `PENDING` (청크 본문 유지) |
+
+`ingest_status = DUPLICATE` 인 문서는 재처리 대상이 아니므로 **400** (`REPROCESS_NOT_ALLOWED_FOR_DUPLICATE_INGEST`).
 
 **Response 200**
 
@@ -215,9 +217,19 @@ Base URL: /api/v1/admin
 ```
 
 **동작**
-- `raw_document.excluded = TRUE` 설정
-- OpenSearch에서 해당 문서의 청크 삭제
-- `index_status = PENDING`은 유지하지 않음 (재색인 불필요)
+- `raw_document.excluded = TRUE`, `excluded_reason` 저장
+- DB 커밋 후 `SearchClient.delete_chunks_for_document` 호출(현재 스텁·로컬 인덱서 클라이언트는 **실제 HTTP 삭제 없음**; 자리 확보)
+- 채팅 **DB 검색** 경로는 `RawDocument.excluded = false` 조건으로 청크가 조인 단계에서 제외됨
+
+---
+
+### POST /api/v1/admin/documents/{raw_document_id}/include
+
+검색 제외 해제 및 재색인 유도.
+
+**동작**
+- `raw_document.excluded = FALSE`, `excluded_reason` 초기화
+- 해당 문서의 모든 `document_chunk.index_status = PENDING`, `raw_document.index_status = PENDING` (워커 인덱서가 다시 소비)
 
 ---
 
