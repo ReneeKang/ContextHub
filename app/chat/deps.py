@@ -29,5 +29,16 @@ def get_search_client(db: Session = Depends(get_db)) -> DbChunkSearchClient:
 
 
 def get_stub_chat_principal() -> PermissionPrincipal:
-    """TODO: derive from Bearer token / session; never trust client-sent scopes."""
+    """
+    PoC fixed principal (no real auth).
+
+    DB search (`DbChunkSearchClient`) applies:
+    - PUBLIC: always allowed
+    - DEPT: allowed only if `department_codes` contains the chunk's `department_code`
+    - PRIVATE: allowed only if `owner_id` matches `user_id`
+
+    Default `department_codes=()` means DEPT-scoped chunks (e.g. `dept/infra/…`) do **not** appear.
+    To test infra DEPT documents in Swagger, temporarily use e.g.:
+        return PermissionPrincipal(user_id="stub-user", department_codes=("infra",))
+    """
     return PermissionPrincipal(user_id="stub-user", department_codes=())

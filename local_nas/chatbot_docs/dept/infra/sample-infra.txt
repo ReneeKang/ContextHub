@@ -1,0 +1,6 @@
+ContextHub department sample (infra) for chat permission tests.
+
+Common keyword: ContextHub
+Infra-department-only keyword: INFRA_SAMPLE_KEYWORD
+
+This file is under dept/infra/ so only principals with department_codes containing infra should see it.

@@ -97,6 +97,32 @@ python -m app.workers
 
 청커는 **`parse_status=DONE`** 인 문서만 처리합니다. 로그에 `documents waiting on parser …` 가 나오면 파서 워커를 먼저 통과시키세요. 청킹 본문은 `app/chunker/service.py` 와 `markdown_chunk.py` 를 참고하면 됩니다.
 
+### 6. Chat 권한 필터 검증 (샘플 NAS)
+
+권한별 샘플 파일(공통 키워드 **ContextHub** + 고유 키워드):
+
+| 경로 | access_scope | 고유 키워드(질문에 넣어 테스트) |
+|------|----------------|-------------------------------|
+| `local_nas/chatbot_docs/public/sample-public.txt` | PUBLIC | `PUBLIC_SAMPLE_KEYWORD` |
+| `local_nas/chatbot_docs/dept/infra/sample-infra.txt` | DEPT (`infra`) | `INFRA_SAMPLE_KEYWORD` |
+| `local_nas/chatbot_docs/private/stub-user/sample-private.txt` | PRIVATE (`stub-user`) | `PRIVATE_SAMPLE_KEYWORD` |
+
+기존 `public/sample.txt` 도 그대로 두어도 됩니다.
+
+**테스트 순서 (Swagger)**
+
+1. 저장소 루트에서 **`python -m app.workers` 를 2회 이상** 실행해 새 파일이 스캔·안정화·파싱·청킹·색인까지 반영합니다. (스캐너는 mtime/size 안정화 규칙을 따릅니다.)
+2. **`GET /api/v1/admin/documents`** 로 `ingest_status=RECEIVED` 등으로 문서 3건(+기존 샘플)이 보이는지 확인합니다.
+3. **`POST /api/v1/chat/query`** 로 질문합니다. (DB `document_chunk` 검색: 공백으로 나눈 **모든** 토큰이 `chunk_text` 또는 `section_title`에 포함되어야 AND 매칭)
+
+**기본 stub principal** (`app/chat/deps.py` 의 `get_stub_chat_principal`):
+
+- **PUBLIC**: 항상 검색 가능 (`public/…`).
+- **DEPT**: 기본값은 `department_codes=()` 이라 **`dept/infra/…` 문서는 검색되지 않음**. `INFRA_SAMPLE_KEYWORD` 만으로는 매칭 문서가 없어야 합니다.
+- **PRIVATE**: `owner_id` 가 `stub-user` 인 경로만 가능 → `private/stub-user/…` 의 `PRIVATE_SAMPLE_KEYWORD` 는 매칭됩니다.
+
+DEPT(infra) 문서까지 채팅에서 보고 싶으면 `get_stub_chat_principal` 에서 주석대로 `department_codes=("infra",)` 로 잠시 바꾼 뒤, 질문에 `INFRA_SAMPLE_KEYWORD` 또는 `ContextHub` 를 넣어 다시 호출합니다.
+
 ## 환경 변수 요약
 
 | 변수 | 설명 |

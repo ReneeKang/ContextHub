@@ -1,0 +1,6 @@
+ContextHub private sample for stub-user for chat permission tests.
+
+Common keyword: ContextHub
+Private-stub-user-only keyword: PRIVATE_SAMPLE_KEYWORD
+
+This file is under private/stub-user/ so only owner_id=stub-user should see it in DB search.
