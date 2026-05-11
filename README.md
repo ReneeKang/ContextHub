@@ -31,6 +31,7 @@ docker compose up -d
 - **Port**: 호스트 `5433` → 컨테이너 내부 `5432` (로컬에 이미 PostgreSQL이 `5432`를 쓰는 경우가 많아 Compose는 `5433`으로 노출합니다)
 - **데이터**: 이름 붙은 볼륨 `contexthub_pgdata`
 - **OpenSearch** (선택, 실 검색/색인용): Compose는 호스트 **9201** → 컨테이너 **9200** 으로 매핑합니다(로컬에서 **9200 포트가 이미 쓰인 경우**가 많아 기본 개발 포트를 9201로 둠). HTTP 예: `http://127.0.0.1:9201`. 이미지는 **`docker/opensearch/Dockerfile`** 로 빌드하며 **`analysis-nori`** 플러그인을 포함합니다. 최초/매핑 변경 후: `docker compose build opensearch && docker compose up -d`. 보안 플러그인은 **비활성**(`plugins.security.disabled=true`) 개발 설정입니다. Linux 호스트에서 컨테이너가 바로 죽으면 `vm.max_map_count` 등 OpenSearch 요구사항을 확인하세요.
+- **OpenSearch 초기 admin 비밀번호 (Compose 전용)**: OpenSearch **2.12 이상**은 컨테이너 기동 시 데모 보안 설치 단계에서 `OPENSEARCH_INITIAL_ADMIN_PASSWORD`가 없으면 **즉시 종료**됩니다. `docker-compose.yml`에 **로컬 개발용** 데모 값(`ContextHubAdmin123!`)을 넣어 두었습니다. 이 값은 **운영 환경에서 절대 사용하지 마세요.** 운영에서는 Security 플러그인·TLS·계정/역할·네트워크 격리 등을 **별도로 설계**하고, 비밀번호·인증서는 비밀 저장소 등으로 관리해야 합니다. 앱의 `OPENSEARCH_BASE_URL`은 **무인증 HTTP**(개발)로 붙는 경로와 별개이며, 이 데모 패스워드를 앱 설정에 넣을 필요는 없습니다.
 
 첫 기동 후 `pg_isready`가 성공할 때까지 잠시 기다린 뒤 다음 단계로 진행합니다. OpenSearch는 healthcheck 통과까지 **1분 내외** 걸릴 수 있습니다.
 
@@ -45,6 +46,28 @@ python -m app.db.opensearch_bootstrap
 ```
 
 인덱스 이름은 `SEARCH_INDEX_NAME`(기본 `contexthub_chunks`)입니다. 이미 있으면 **건너뜁니다**. 매핑·분석기는 `docs/search-index.md` 및 `app/adapters/opensearch_index_mapping.py` 를 참고하세요.
+
+#### OpenSearch 개발용 인덱스 리셋 (매핑·분석기 변경 후)
+
+**운영에서는 사용하지 마세요.** `app/db/opensearch_reset_dev.py` 는 로컬에서 매핑/분석기(nori 등)를 바꾼 뒤 인덱스를 비우고 다시 올릴 때만 쓰는 스크립트입니다.
+
+동작 요약:
+
+1. `SEARCH_INDEX_NAME`에 해당하는 OpenSearch 인덱스가 있으면 **삭제** 후, `python -m app.db.opensearch_bootstrap` 과 **동일한** `chunk_index_create_body()`로 **재생성**합니다.
+2. PostgreSQL: 모든 `document_chunk.index_status`·`raw_document.index_status`를 **PENDING**으로 되돌려 워커가 다시 색인하도록 합니다.
+3. **`document_index_status`**: 같은 인덱스 이름(`index_name` = 현재 `SEARCH_INDEX_NAME`)에 대한 이력 행은 **삭제**합니다. 재색인 시 인덱서가 DONE/FAILED 이력을 새로 쌓으며, 관리 화면 등에서 이전 성공 건수와 실제 OpenSearch 상태가 어긋나지 않게 하기 위함입니다. (다른 인덱스 이름으로 쌓인 과거 행은 그대로 둡니다.)
+
+실행 순서 예시:
+
+```bash
+docker compose build opensearch
+docker compose up -d
+python -m app.db.opensearch_reset_dev
+python -m app.workers
+```
+
+- **리셋 스크립트가 인덱스를 삭제 후 재생성**하므로, 매핑 변경 루프에서는 위처럼 `opensearch_reset_dev`만으로 충분합니다. OpenSearch를 처음 붙일 때만 `python -m app.db.opensearch_bootstrap` 으로 인덱스를 만들어도 됩니다(이미 있으면 스킵).
+- 워커를 한 번 이상 돌려 PENDING 청크를 소비한 뒤, `SEARCH_BACKEND=opensearch`인 상태에서 Swagger **`POST /api/v1/chat/query`** 등으로 검색을 확인하면 됩니다.
 
 실제 HTTP 검색/색인을 쓰려면 같은 `.env`에서 **`SEARCH_BACKEND=opensearch`** 로 바꾼 다음 API·워커를 재시작합니다. 기본값 **`SEARCH_BACKEND=db`** 는 PostgreSQL 폴백을 유지합니다.
 
