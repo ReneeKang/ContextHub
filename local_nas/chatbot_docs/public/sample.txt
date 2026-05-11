@@ -1,0 +1,4 @@
+ContextHub local NAS sample (public scope).
+
+This file exists under local_nas/chatbot_docs/public/ for scanner PoC runs.
+Second consecutive worker run (unchanged file) registers raw_document after stabilization.
