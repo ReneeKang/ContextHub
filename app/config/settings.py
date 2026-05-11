@@ -28,8 +28,12 @@ class Settings(BaseSettings):
     opensearch_base_url: str | None = Field(
         default=None,
         alias="OPENSEARCH_BASE_URL",
-        description="OpenSearch HTTP base URL (e.g. http://127.0.0.1:9200). Required when SEARCH_BACKEND=opensearch.",
+        description="OpenSearch HTTP base URL (e.g. http://127.0.0.1:9201 with default Compose host port). Required when SEARCH_BACKEND=opensearch.",
     )
+    #: Log first-hit ``_explanation`` at DEBUG after search (verbose).
+    opensearch_search_explain: bool = Field(default=False, alias="OPENSEARCH_SEARCH_EXPLAIN")
+    #: Include ``highlight`` in search body (OpenSearch only).
+    opensearch_search_highlight: bool = Field(default=True, alias="OPENSEARCH_SEARCH_HIGHLIGHT")
     parser_name: str = Field(
         default="routing",
         alias="PARSER_NAME",

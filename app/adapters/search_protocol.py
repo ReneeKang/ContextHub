@@ -32,6 +32,8 @@ class SearchHit:
     chunk_text: str
     access_scope: str
     score: float
+    #: OpenSearch ``highlight`` fragments per field (e.g. ``chunk_text``); DB backend leaves ``None``.
+    highlights: dict[str, list[str]] | None = None
 
 
 @dataclass(frozen=True, slots=True)

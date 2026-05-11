@@ -4,6 +4,8 @@
 
 OpenSearch (또는 Elasticsearch 호환)
 
+**관련**: 로컬 이미지·nori·BM25·재색인 운영은 [`search-quality.md`](search-quality.md) 를 참고한다. 로컬 Compose는 `docker/opensearch/Dockerfile` 로 **analysis-nori** 를 포함한다.
+
 ---
 
 ## 인덱스 구조

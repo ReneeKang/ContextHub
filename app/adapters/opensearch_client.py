@@ -7,6 +7,7 @@ HTTP-backed ``SearchClient`` for OpenSearch (keyword search + index/delete).
 
 from __future__ import annotations
 
+import json
 import logging
 from typing import Any, Iterable
 from urllib.parse import urlparse
@@ -79,10 +80,13 @@ class OpenSearchHttpClient(SearchClient):
             top_k=top_k,
             principal_user_id=principal.user_id,
             department_codes=principal.department_codes,
+            include_highlight=self._settings.opensearch_search_highlight,
         )
         client = self._os()
+        explain = self._settings.opensearch_search_explain
+        params = {"explain": "true"} if explain else None
         try:
-            resp = client.search(index=index_name, body=body)
+            resp = client.search(index=index_name, body=body, params=params)
         except OpenSearchException:
             log.exception(
                 "OpenSearch search failed index=%r base_url=%r",
@@ -91,9 +95,19 @@ class OpenSearchHttpClient(SearchClient):
             )
             raise
         hits = resp.get("hits", {}).get("hits", []) or []
+        if explain and hits:
+            ex0 = hits[0].get("_explanation")
+            if ex0 is not None:
+                log.debug(
+                    "OpenSearch explain (first hit _id=%s): %s",
+                    hits[0].get("_id"),
+                    json.dumps(ex0, ensure_ascii=False)[:12000],
+                )
         out: list[SearchHit] = []
         for h in hits:
             src = h.get("_source") or {}
+            hl_raw = h.get("highlight") or {}
+            highlights = {k: list(v) for k, v in hl_raw.items()} if hl_raw else None
             try:
                 out.append(
                     SearchHit(
@@ -106,16 +120,19 @@ class OpenSearchHttpClient(SearchClient):
                         chunk_text=str(src.get("chunk_text") or ""),
                         access_scope=str(src.get("access_scope") or "PUBLIC"),
                         score=float(h.get("_score") or 0.0),
+                        highlights=highlights,
                     )
                 )
             except (KeyError, TypeError, ValueError) as exc:
                 log.warning("skip malformed hit _id=%r err=%s src_keys=%s", h.get("_id"), exc, list(src.keys()))
                 continue
         log.info(
-            "OpenSearch search index=%r query_len=%s hits=%s",
+            "OpenSearch search index=%r query_len=%s hits=%s explain=%s highlight=%s",
             index_name,
             len(query or ""),
             len(out),
+            explain,
+            self._settings.opensearch_search_highlight,
         )
         return out
 

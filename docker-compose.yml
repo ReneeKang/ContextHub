@@ -1,6 +1,9 @@
 services:
   opensearch:
-    image: opensearchproject/opensearch:2.17.1
+    build:
+      context: ./docker/opensearch
+      dockerfile: Dockerfile
+    image: contexthub-opensearch:2.17-nori
     container_name: contexthub-opensearch
     environment:
       - discovery.type=single-node
@@ -15,7 +18,8 @@ services:
         soft: 65536
         hard: 65536
     ports:
-      - "9200:9200"
+      # Host 9201 avoids conflict with another process bound to 9200 (e.g. local Elasticsearch). Inside container: 9200.
+      - "9201:9200"
       - "9600:9600"
     healthcheck:
       test: ["CMD-SHELL", "curl -sf http://127.0.0.1:9200 >/dev/null || exit 1"]

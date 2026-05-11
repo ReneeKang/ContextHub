@@ -98,39 +98,70 @@ def build_permission_filter_clause(principal_user_id: str, department_codes: tup
     return {"bool": {"should": should, "minimum_should_match": 1}}
 
 
+def _cross_fields_multi_match(query: str) -> dict[str, Any]:
+    """
+    BM25 across shared nori-analyzed fields: all analyzed terms must match somewhere (AND).
+
+    ``heading_path.kw`` is excluded here (keyword); boosted separately via ``term`` when the
+    normalized query equals the stored breadcrumb.
+    """
+    return {
+        "multi_match": {
+            "query": query,
+            "fields": [
+                "chunk_text^3.2",
+                "section_title^2.9",
+                "heading_path^2.7",
+                "original_filename.nori^3.0",
+            ],
+            "type": "cross_fields",
+            "operator": "and",
+            "tie_breaker": 0.03,
+        }
+    }
+
+
 def build_keyword_search_body(
     *,
     query: str,
     top_k: int,
     principal_user_id: str,
     department_codes: tuple[str, ...],
+    include_highlight: bool = True,
 ) -> dict[str, Any]:
     """
-    Example OpenSearch request body for chat-style keyword search (BM25 + nori on index mapping).
+    Keyword search body: BM25 ``cross_fields`` + AND operator, permission **filter** context,
+    optional ``highlight``, optional exact ``heading_path.kw`` boost (normalized lowercase).
 
-    Hybrid Phase: add a `should` knn/rescore block; keep this filter as sibling under bool.filter.
+    Hybrid / vector: add ``should`` knn or ``rescore`` in a later phase; keep ``filter`` unchanged.
     """
     perm = build_permission_filter_clause(principal_user_id, department_codes)
-    return {
+    q = (query or "").strip()
+
+    if not q:
+        # Caller should usually short-circuit; this keeps the bool shape valid (no hits).
+        root_bool: dict[str, Any] = {
+            "filter": [perm],
+            "must_not": [{"match_all": {}}],
+        }
+    else:
+        should_clauses: list[dict[str, Any]] = []
+        if len(q) <= 4096:
+            should_clauses.append(
+                {"term": {"heading_path.kw": {"value": q.lower(), "boost": 10.0}}},
+            )
+        root_bool = {
+            "must": [_cross_fields_multi_match(q)],
+            "filter": [perm],
+            "minimum_should_match": 0,
+        }
+        if should_clauses:
+            root_bool["should"] = should_clauses
+
+    body: dict[str, Any] = {
         "size": top_k,
-        "query": {
-            "bool": {
-                "must": [
-                    {
-                        "multi_match": {
-                            "query": query,
-                            "fields": [
-                                "chunk_text^2",
-                                "section_title^2.5",
-                                "heading_path^1.5",
-                            ],
-                            "type": "best_fields",
-                        }
-                    }
-                ],
-                "filter": [perm],
-            }
-        },
+        "track_total_hits": False,
+        "query": {"bool": root_bool},
         "_source": [
             "chunk_id",
             "raw_document_id",
@@ -145,6 +176,22 @@ def build_keyword_search_body(
             "chunk_no",
         ],
     }
+
+    if include_highlight and q:
+        body["highlight"] = {
+            "require_field_match": False,
+            "number_of_fragments": 3,
+            "fragment_size": 180,
+            "pre_tags": ["<em>"],
+            "post_tags": ["</em>"],
+            "fields": {
+                "chunk_text": {},
+                "section_title": {"number_of_fragments": 1, "fragment_size": 256},
+                "heading_path": {"number_of_fragments": 1, "fragment_size": 512},
+                "original_filename.nori": {"number_of_fragments": 1, "fragment_size": 256},
+            },
+        }
+    return body
 
 
 def build_delete_by_raw_document_query(raw_document_id: str) -> dict[str, Any]:

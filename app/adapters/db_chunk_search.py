@@ -119,6 +119,7 @@ class DbChunkSearchClient(SearchClient):
                     chunk_text=chunk.chunk_text,
                     access_scope=chunk.access_scope.value,
                     score=1.0,
+                    highlights=None,
                 )
             )
         log.info(

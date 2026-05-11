@@ -30,7 +30,7 @@ docker compose up -d
 - **User / password**: `contexthub` / `contexthub`
 - **Port**: 호스트 `5433` → 컨테이너 내부 `5432` (로컬에 이미 PostgreSQL이 `5432`를 쓰는 경우가 많아 Compose는 `5433`으로 노출합니다)
 - **데이터**: 이름 붙은 볼륨 `contexthub_pgdata`
-- **OpenSearch** (선택, 실 검색/색인용): 호스트 **9200** → HTTP (`http://127.0.0.1:9200`). 보안 플러그인은 **비활성**(`plugins.security.disabled=true`) 개발 설정입니다. Linux 호스트에서 컨테이너가 바로 죽으면 `vm.max_map_count` 등 OpenSearch 요구사항을 확인하세요.
+- **OpenSearch** (선택, 실 검색/색인용): Compose는 호스트 **9201** → 컨테이너 **9200** 으로 매핑합니다(로컬에서 **9200 포트가 이미 쓰인 경우**가 많아 기본 개발 포트를 9201로 둠). HTTP 예: `http://127.0.0.1:9201`. 이미지는 **`docker/opensearch/Dockerfile`** 로 빌드하며 **`analysis-nori`** 플러그인을 포함합니다. 최초/매핑 변경 후: `docker compose build opensearch && docker compose up -d`. 보안 플러그인은 **비활성**(`plugins.security.disabled=true`) 개발 설정입니다. Linux 호스트에서 컨테이너가 바로 죽으면 `vm.max_map_count` 등 OpenSearch 요구사항을 확인하세요.
 
 첫 기동 후 `pg_isready`가 성공할 때까지 잠시 기다린 뒤 다음 단계로 진행합니다. OpenSearch는 healthcheck 통과까지 **1분 내외** 걸릴 수 있습니다.
 
@@ -38,7 +38,7 @@ docker compose up -d
 
 #### OpenSearch 인덱스 생성 (한 번)
 
-`.env`에 `OPENSEARCH_BASE_URL=http://127.0.0.1:9200` 를 넣은 뒤:
+`.env`에 `OPENSEARCH_BASE_URL=http://127.0.0.1:9201` 를 넣은 뒤:
 
 ```bash
 python -m app.db.opensearch_bootstrap
@@ -211,7 +211,7 @@ Swagger에서 **admin** 태그 아래 위 엔드포인트를 펼치고 **Try it 
 
 관련 코드: `app/adapters/search_protocol.py`, `opensearch_payload.py`, `opensearch_stub.py`, `opensearch_client.py`, `opensearch_index_mapping.py`, `search_backend.py`, `app/chat/deps.py` 의 `get_search_client`.
 
-**Hybrid / 벡터** 는 BM25 `must` + `knn` `should` + 동일 `filter` 로 확장 (미구현, `docs/search-index.md` 참고).
+**Hybrid / 벡터** 는 BM25 `must` + `knn` `should` + 동일 `filter` 로 확장 (미구현). 품질·재색인·nori 전략은 **`docs/search-quality.md`** 를 참고하세요.
 
 ## 환경 변수 요약
 
@@ -222,7 +222,9 @@ Swagger에서 **admin** 태그 아래 위 엔드포인트를 펼치고 **Try it 
 | `SCAN_INTERVAL_SECONDS` | (향후) 스캔/워커 주기 참고용 초 단위 |
 | `SEARCH_INDEX_NAME` | OpenSearch 인덱스 논리 이름 (`contexthub_chunks`) |
 | `SEARCH_BACKEND` | `db`(기본) \| `opensearch_stub`(무HTTP) \| `opensearch`(HTTP; 인덱스 부트스트랩 필요) |
-| `OPENSEARCH_BASE_URL` | 예: `http://127.0.0.1:9200` (`SEARCH_BACKEND=opensearch` 일 때 필수) |
+| `OPENSEARCH_BASE_URL` | 예: `http://127.0.0.1:9201` (Compose 기본 호스트 포트; `SEARCH_BACKEND=opensearch` 일 때 필수) |
+| `OPENSEARCH_SEARCH_HIGHLIGHT` | `true`(기본): 검색 바디에 `highlight` 포함 |
+| `OPENSEARCH_SEARCH_EXPLAIN` | `false`(기본): `true` 이면 첫 히트 BM25 explain 을 DEBUG 로그에 일부 출력 |
 | `PARSER_NAME` / `PARSER_VERSION` | DB에 쓸 파서 이름 폴백(기본 `routing`) / 버전 폴백; 포맷별 어댑터가 `parser_name`·`parser_version`을 넣으면 그 값이 우선 |
 
 ## 외부 연동
