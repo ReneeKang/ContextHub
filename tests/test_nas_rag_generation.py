@@ -57,8 +57,10 @@ class _RecordingLLM:
 
 
 def test_query_log_snippet_truncates_long_question() -> None:
+    from app.chat.retrieval_query import format_query_log_snippet
+
     long_q = "x" * 500
-    s = nas_rag._query_log_snippet(long_q, max_len=400)
+    s = format_query_log_snippet(long_q, max_len=400)
     assert len(s) == 401  # 400 + ellipsis
     assert s.endswith("…")
     assert "x" * 400 in s

@@ -6,6 +6,7 @@ import time
 from sqlalchemy.orm import Session
 
 from app.adapters.search_protocol import PermissionPrincipal, SearchClient, SearchHit
+from app.chat.retrieval_query import format_query_log_snippet, normalize_retrieval_query_pair
 from app.chat.schemas import ChatGenerateResponse, ChatQueryRequest, ChatSourceItem
 from app.config.settings import Settings
 from app.llm.backend import get_llm_client
@@ -58,13 +59,14 @@ def _retrieve_hits_for_nas_rag(
     search: SearchClient,
     settings: Settings,
     principal: PermissionPrincipal,
-    body: ChatQueryRequest,
+    retrieval_query: str,
+    top_k: int,
 ) -> tuple[list[SearchHit], int]:
     """Run permission-aware search; ``hits`` are exactly what ``SearchClient.search`` returns (already filtered)."""
     t0 = time.perf_counter()
     hits = search.search(
-        query=body.question,
-        top_k=body.top_k or 5,
+        query=retrieval_query,
+        top_k=top_k,
         principal=principal,
         index_name=settings.search_index_name,
     )
@@ -89,13 +91,6 @@ def _sources_from_hits(hits: list[SearchHit]) -> list[ChatSourceItem]:
     ]
 
 
-def _query_log_snippet(question: str, max_len: int = 400) -> str:
-    q = question.replace("\n", " ").strip()
-    if len(q) <= max_len:
-        return q
-    return q[:max_len] + "…"
-
-
 def run_nas_rag_generate(
     session: Session,
     settings: Settings,
@@ -110,17 +105,26 @@ def run_nas_rag_generate(
     """
     _ = session
     t0 = time.perf_counter()
+    original_q = body.question
+    retrieval_q, norm_applied = normalize_retrieval_query_pair(original_q)
+    top_k = body.top_k or 5
     hits, retrieval_ms = _retrieve_hits_for_nas_rag(
-        search=search, settings=settings, principal=principal, body=body
+        search=search,
+        settings=settings,
+        principal=principal,
+        retrieval_query=retrieval_q,
+        top_k=top_k,
     )
     sources = _sources_from_hits(hits)
 
     if not hits:
         total_ms = int((time.perf_counter() - t0) * 1000)
         log.info(
-            "nas_rag_generate query=%r retrieval_count=0 retrieval_ms=%s used_chunk_ids=[] "
-            "llm_model=%s llm_mock=%s latency_ms=%s",
-            _query_log_snippet(body.question),
+            "nas_rag_generate original_query=%r retrieval_query=%r normalization_applied=%s "
+            "retrieval_count=0 retrieval_ms=%s used_chunk_ids=[] llm_model=%s llm_mock=%s latency_ms=%s",
+            format_query_log_snippet(original_q),
+            format_query_log_snippet(retrieval_q),
+            norm_applied,
             retrieval_ms,
             None,
             False,
@@ -157,10 +161,13 @@ def run_nas_rag_generate(
     except Exception as exc:
         err_msg = str(exc).replace("\n", " ")[:500]
         log.warning(
-            "nas_rag_generate llm_failed error_type=%s error_message=%r query=%r retrieval_count=%s used_chunk_ids=%s",
+            "nas_rag_generate llm_failed error_type=%s error_message=%r original_query=%r retrieval_query=%r "
+            "normalization_applied=%s retrieval_count=%s used_chunk_ids=%s",
             type(exc).__name__,
             err_msg,
-            _query_log_snippet(body.question),
+            format_query_log_snippet(original_q),
+            format_query_log_snippet(retrieval_q),
+            norm_applied,
             len(hits),
             [str(h.chunk_id) for h in hits],
         )
@@ -171,9 +178,11 @@ def run_nas_rag_generate(
 
     used_ids = [str(h.chunk_id) for h in hits]
     log.info(
-        "nas_rag_generate query=%r retrieval_count=%s retrieval_ms=%s used_chunk_ids=%s "
-        "llm_model=%s llm_mock=%s latency_ms=%s",
-        _query_log_snippet(body.question),
+        "nas_rag_generate original_query=%r retrieval_query=%r normalization_applied=%s retrieval_count=%s "
+        "retrieval_ms=%s used_chunk_ids=%s llm_model=%s llm_mock=%s latency_ms=%s",
+        format_query_log_snippet(original_q),
+        format_query_log_snippet(retrieval_q),
+        norm_applied,
         len(hits),
         retrieval_ms,
         used_ids,

@@ -67,7 +67,7 @@ python -m app.workers
 ```
 
 - **리셋 스크립트가 인덱스를 삭제 후 재생성**하므로, 매핑 변경 루프에서는 위처럼 `opensearch_reset_dev`만으로 충분합니다. OpenSearch를 처음 붙일 때만 `python -m app.db.opensearch_bootstrap` 으로 인덱스를 만들어도 됩니다(이미 있으면 스킵).
-- 워커를 한 번 이상 돌려 PENDING 청크를 소비한 뒤, `SEARCH_BACKEND=opensearch`인 상태에서 Swagger **`POST /api/v1/chat/query`** 등으로 검색을 확인하면 됩니다.
+- 워커를 한 번 이상 돌려 PENDING 청크를 소비한 뒤, `SEARCH_BACKEND=opensearch`인 상태에서 Swagger **`POST /api/v1/chat/query`** 또는 **`POST /api/v1/chat/generate`**(요청 body 필수: `question`) 등으로 검색·생성을 확인하면 됩니다.
 
 실제 HTTP 검색/색인을 쓰려면 같은 `.env`에서 **`SEARCH_BACKEND=opensearch`** 로 바꾼 다음 API·워커를 재시작합니다. 기본값 **`SEARCH_BACKEND=db`** 는 PostgreSQL 폴백을 유지합니다.
 
@@ -142,6 +142,23 @@ uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 | `cen.dir.go.kr` |
 
 문서 본문·메타에 해당 표현이 없으면 히트가 0건일 수 있습니다. 그 경우에도 응답에는 **`search_backend`** 가 포함됩니다.
+
+#### RAG 생성 (`POST /api/v1/chat/generate`)
+
+검색 후 LLM(또는 mock)으로 답을 만든다. 요청 body는 `app/chat/schemas.py`의 **`ChatQueryRequest`**이며 **`POST /api/v1/chat/query`와 동일**하다. **필수 필드는 `question`**(문자열)이다.
+
+Swagger **Try it out** 예시:
+
+```json
+{
+  "question": "Kubeflow 워크플로우",
+  "top_k": 5,
+  "session_id": null,
+  "test_department_codes": null
+}
+```
+
+`test_department_codes`는 생략할 수 있다(DEPT 스텁 검증 시 `["infra"]` 등).
 
 ### 5. 워커 (별도 터미널)
 

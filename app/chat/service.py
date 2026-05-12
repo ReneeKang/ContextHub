@@ -1,10 +1,15 @@
 from __future__ import annotations
 
+import logging
+
 from sqlalchemy.orm import Session
 
 from app.adapters.search_protocol import PermissionPrincipal, SearchClient, SearchHit
+from app.chat.retrieval_query import format_query_log_snippet, normalize_retrieval_query_pair
 from app.chat.schemas import ChatQueryRequest, ChatQueryResponse, ChatSourceItem
 from app.config.settings import Settings
+
+log = logging.getLogger("contexthub.chat.service")
 
 
 def _build_stub_answer(*, question: str, hits: list[SearchHit]) -> str:
@@ -48,11 +53,21 @@ class ChatService:
         """
         _ = self._session
         top_k = body.top_k or 5
+        original_q = body.question
+        retrieval_q, norm_applied = normalize_retrieval_query_pair(original_q)
         hits = self._search.search(
-            query=body.question,
+            query=retrieval_q,
             top_k=top_k,
             principal=self._principal,
             index_name=self._settings.search_index_name,
+        )
+        log.info(
+            "chat_query original_query=%r retrieval_query=%r normalization_applied=%s retrieval_count=%s search_backend=%s",
+            format_query_log_snippet(original_q),
+            format_query_log_snippet(retrieval_q),
+            norm_applied,
+            len(hits),
+            self._settings.search_backend,
         )
         sources = [
             ChatSourceItem(

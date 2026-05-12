@@ -69,6 +69,7 @@ NAS 공식 반입 폴더
 | [permission-policy.md](permission-policy.md) | 경로 기반 권한 정책 · PermissionPrincipal · 멀티에이전트 확장 방향 |
 | [parser-kordoc.md](parser-kordoc.md) | kordoc 역할 범위 · Parse Worker 연동 구조 |
 | [search-index.md](search-index.md) | 검색 인덱스 설계 · 권한 필터 검색 |
+| [retrieval-roadmap.md](retrieval-roadmap.md) | keyword retrieval MVP 이후 vector/hybrid retrieval 확장 방향 문서 |
 | [admin-features.md](admin-features.md) | 관리자 최소 기능 요구사항 |
 | [document-versioning.md](document-versioning.md) | 문서 변경 감지 · 버전 전략 · 운영형 RAG 관행 |
 | [agent-architecture.md](agent-architecture.md) | Agent 레이어 구조 · 4단계 흐름 · trace_id · 멀티에이전트 확장 경로 |
@@ -77,7 +78,7 @@ NAS 공식 반입 폴더
 | [logging-audit.md](logging-audit.md) | Gateway 운영 로그 vs Agent 감사 로그 분리 · 원문 금지 이유 · trace_id 장애 분석 |
 | [poc-scope.md](poc-scope.md) | PoC에서 할 것 / 하지 말아야 할 것 |
 | [todo-roadmap.md](todo-roadmap.md) | 단계별 로드맵 |
-| [backend-status.md](backend-status.md) | 백엔드·LLM·RAG MVP 구현 상태와 `/chat/generate` 사용법 |
+| [backend-status.md](backend-status.md) | 백엔드·LLM·RAG MVP 구현 상태, `/chat/generate` 사용법(요청: `ChatQueryRequest`, 필수 `question`) |
 
 ---
 
