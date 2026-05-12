@@ -77,6 +77,7 @@ NAS 공식 반입 폴더
 | [logging-audit.md](logging-audit.md) | Gateway 운영 로그 vs Agent 감사 로그 분리 · 원문 금지 이유 · trace_id 장애 분석 |
 | [poc-scope.md](poc-scope.md) | PoC에서 할 것 / 하지 말아야 할 것 |
 | [todo-roadmap.md](todo-roadmap.md) | 단계별 로드맵 |
+| [backend-status.md](backend-status.md) | 백엔드·LLM·RAG MVP 구현 상태와 `/chat/generate` 사용법 |
 
 ---
 

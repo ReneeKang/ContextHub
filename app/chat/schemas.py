@@ -51,3 +51,19 @@ class ChatQueryResponse(BaseModel):
     )
     sources: list[ChatSourceItem]
     session_id: str | None = None
+
+
+class ChatGenerateResponse(BaseModel):
+    """RAG generation: same retrieval contract as ``/query``; ``sources`` are always from hits, not model parsing."""
+
+    answer: str
+    search_backend: SearchBackendLiteral
+    sources: list[ChatSourceItem]
+    session_id: str | None = None
+    llm_model: str | None = Field(default=None, description="Model id reported by the LLM client (null when LLM skipped).")
+    llm_mock: bool = Field(
+        description="True when mock client or mock backend path was used. False when LLM was skipped (zero hits) or a live OpenAI-compatible client answered.",
+    )
+    retrieval_latency_ms: int
+    llm_latency_ms: int | None = Field(default=None, description="Null when LLM was not invoked (e.g. zero hits).")
+    total_latency_ms: int

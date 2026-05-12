@@ -5,6 +5,7 @@ from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 SearchBackendLiteral = Literal["db", "opensearch_stub", "opensearch"]
+LlmBackendLiteral = Literal["mock", "openai_compat"]
 
 
 class Settings(BaseSettings):
@@ -40,6 +41,19 @@ class Settings(BaseSettings):
         description="Fallback parser_name when adapter omits it; per-format engines set their own name.",
     )
     parser_version: str = Field(default="stub-0.0.0", alias="PARSER_VERSION")
+
+    #: When ``True``, always use mock LLM (ignores ``LLM_BACKEND`` for HTTP).
+    llm_mock_mode: bool = Field(default=True, alias="LLM_MOCK_MODE")
+    llm_backend: LlmBackendLiteral = Field(default="mock", alias="LLM_BACKEND")
+    openai_compat_base_url: str | None = Field(
+        default=None,
+        alias="OPENAI_COMPAT_BASE_URL",
+        description="OpenAI-compatible API base, e.g. https://api.openai.com/v1 (no path suffix).",
+    )
+    openai_compat_api_key: str | None = Field(default=None, alias="OPENAI_COMPAT_API_KEY")
+    #: HTTP read timeout (seconds) for ``OpenAICompatLLMClient`` (``urllib.request.urlopen``).
+    openai_compat_timeout_seconds: float = Field(default=120.0, alias="OPENAI_COMPAT_TIMEOUT_SECONDS")
+    llm_model: str = Field(default="gpt-4o-mini", alias="LLM_MODEL")
 
 
 @lru_cache
