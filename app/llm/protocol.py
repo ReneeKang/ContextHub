@@ -21,9 +21,12 @@ class LLMClient(Protocol):
     """
     Minimal chat-completions style surface (sync, no streaming).
 
-    Implementations (:class:`app.llm.mock.MockLLMClient`, :class:`app.llm.openai_compat.OpenAICompatLLMClient`)
-    must accept the same keyword arguments and return :class:`LLMCompletionResult`.
-    HTTP backends should POST to ``{normalized_base}/chat/completions`` (see ``normalize_openai_compat_base_url``).
+    Implementations (:class:`app.llm.mock.MockLLMClient`, :class:`app.llm.openai_compat.OpenAICompatLLMClient`,
+    :class:`app.llm.internal_chat.InternalChatLLMClient`, :class:`app.llm.internal_generate.InternalGenerateLLMClient`)
+    must accept the same keyword arguments and return
+    :class:`LLMCompletionResult`. OpenAI-compatible HTTP backends POST to ``{normalized_base}/chat/completions``;
+    internal corporate gateways use :class:`~app.llm.internal_chat.InternalChatLLMClient` or
+    :class:`~app.llm.internal_generate.InternalGenerateLLMClient` instead.
     """
 
     def complete(

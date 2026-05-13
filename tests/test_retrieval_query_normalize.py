@@ -35,9 +35,15 @@ def test_original_question_unchanged_in_llm_user_prompt() -> None:
     assert f"QUESTION:\n{q}\n" in prompt
 
 
-def test_normalize_strips_common_request_phrases() -> None:
-    assert normalize_retrieval_query("LDAP 알려줘") == "LDAP"
-    assert normalize_retrieval_query("정책 요약해줘") == "정책"
+def test_normalize_korean_question_glue_phrases() -> None:
+    assert normalize_retrieval_query("쿠베플로우에 대해 설명해줘") == "쿠베플로우"
+    assert normalize_retrieval_query("방화벽 포트 오픈에 대해 설명해줘") == "방화벽 포트 오픈"
+
+
+def test_normalize_pair_korean_question_glue() -> None:
+    q, applied = normalize_retrieval_query_pair("쿠베플로우에 대해 설명해줘")
+    assert q == "쿠베플로우"
+    assert applied is True
 
 
 def test_normalize_fallback_when_only_stopwords() -> None:

@@ -11,8 +11,21 @@ from __future__ import annotations
 import re
 from typing import Final
 
+
+def _strip_embedded_question_phrases(text: str) -> str:
+    """
+    Remove Korean question-style glue phrases that are often written **without** a space
+    before the topic (e.g. ``쿠베플로우에 대해 설명해줘`` → tokens would not split ``에 대해``).
+    """
+    t = text.strip()
+    for phrase in ("에 대해서", "에 대해"):
+        t = t.replace(phrase, " ")
+    return re.sub(r"\s+", " ", t).strip()
+
+
 # Strip from the right, longest phrase first (repeat until stable).
 _RETRIEVAL_SUFFIXES: Final[tuple[str, ...]] = (
+    "설명해 주세요",
     "설명해주세요",
     "설명해줘",
     "요약해주세요",
@@ -37,6 +50,8 @@ _RETRIEVAL_SUFFIXES: Final[tuple[str, ...]] = (
 # Remove as whole whitespace-delimited tokens after suffix pass.
 _TOKEN_STOPWORDS: Final[frozenset[str]] = frozenset(
     {
+        "대해",
+        "대해서",
         "설명",
         "알려줘",
         "알려주세요",
@@ -72,7 +87,7 @@ def normalize_retrieval_query_pair(question: str) -> tuple[str, bool]:
     if not original:
         return original, False
 
-    q = original
+    q = _strip_embedded_question_phrases(original)
     changed = True
     while changed:
         changed = False
@@ -98,6 +113,8 @@ def normalize_retrieval_query(question: str) -> str:
 
     * Removes common Korean request / filler tokens so e.g. ``… 오픈 설명`` still matches chunks
       that contain ``… 오픈`` without the literal ``설명`` tail.
+    * Strips embedded ``에 대해`` / ``에 대해서`` (often glued to the topic without a space) before
+      suffix and token passes, e.g. ``쿠베플로우에 대해 설명해줘`` → ``쿠베플로우``.
     * If stripping yields an empty string, returns ``question.strip()`` unchanged.
     """
     text, _ = normalize_retrieval_query_pair(question)
