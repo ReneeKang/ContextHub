@@ -1,6 +1,0 @@
-ContextHub public sample for chat permission tests.
-
-Common keyword: ContextHub
-Public-only keyword: PUBLIC_SAMPLE_KEYWORD
-
-This file is under public/ so any authenticated stub principal can retrieve it via DB search.

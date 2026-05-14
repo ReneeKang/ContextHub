@@ -35,3 +35,6 @@ htmlcov/
 
 # Logs
 *.log
+
+# Local NAS sandbox (test documents; keep out of version control)
+local_nas/
