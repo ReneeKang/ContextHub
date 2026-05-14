@@ -7,7 +7,7 @@ from sqlalchemy.orm import Session
 
 from app.adapters.search_backend import search_client_for_chat
 from app.adapters.search_protocol import PermissionPrincipal, SearchClient
-from app.chat.schemas import ChatQueryRequest
+from app.chat.schemas import ChatQueryRequest, DiscoverRequest
 from app.config.settings import Settings, get_settings
 from app.db.session import get_db as _get_db
 
@@ -34,7 +34,7 @@ def get_search_client(
     return search_client_for_chat(db, settings)
 
 
-def resolve_stub_principal_for_chat(body: ChatQueryRequest) -> PermissionPrincipal:
+def resolve_stub_principal_for_chat(body: ChatQueryRequest | DiscoverRequest) -> PermissionPrincipal:
     """
     PoC stub user (no real auth). `user_id` is fixed; `department_codes` come from the request
     when `test_department_codes` is set (Swagger / local tests only).

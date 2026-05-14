@@ -1,7 +1,7 @@
 from functools import lru_cache
 from typing import Literal
 
-from pydantic import Field
+from pydantic import Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 SearchBackendLiteral = Literal["db", "opensearch_stub", "opensearch"]
@@ -15,6 +15,25 @@ class Settings(BaseSettings):
         extra="ignore",
         populate_by_name=True,
     )
+
+    @model_validator(mode="before")
+    @classmethod
+    def _drop_shadowed_env_alias_keys(cls, data: object) -> object:
+        """
+        pydantic-settings merge can leave **both** the Python field name (from init kwargs)
+        and the env **alias** key (e.g. ``SEARCH_BACKEND``) in the same input dict. Core
+        validation may then prefer the alias and ignore explicit ``Settings(search_backend=…)``,
+        which breaks tests and any programmatic override. If both exist, keep the field name.
+        """
+        if not isinstance(data, dict):
+            return data
+        for fname, finfo in cls.model_fields.items():
+            alias = finfo.alias
+            if not isinstance(alias, str) or not alias or alias == fname:
+                continue
+            if fname in data and alias in data:
+                del data[alias]
+        return data
 
     database_url: str = Field(
         default="postgresql+psycopg://contexthub:contexthub@127.0.0.1:5433/contexthub",

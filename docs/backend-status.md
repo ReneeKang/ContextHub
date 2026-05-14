@@ -9,6 +9,7 @@
 | 엔드포인트 | 역할 | 구현 위치 |
 |-------------|------|-----------|
 | `POST /api/v1/chat/query` | **Retrieval 전용** 검증: 권한 필터 검색 + 스텁 형태의 `answer` (LLM 미호출) | `app/chat/router.py`, `app/chat/service.py` |
+| `POST /api/v1/chat/discover` | **문서 탐색 MVP**: 동일 `SearchClient.search`로 chunk 검색 후 `raw_document_id` 단위로 묶어 반환 (LLM 미호출, `chunk_text` 미포함) | `app/chat/router.py`, `app/chat/discovery_service.py` |
 | `POST /api/v1/chat/generate` | **RAG generation MVP**: 동일 검색 계약으로 히트 조회 후 LLM 호출(또는 mock) | `app/chat/router.py`, `app/agents/nas_rag.py` |
 | `GET /api/v1/chat/history/{session_id}` | 미구현 (501) | `app/chat/router.py` |
 
@@ -25,6 +26,7 @@
 
 이 분리 덕분에 **LLM이 없어도 검색 파이프라인을 독립적으로 검증**할 수 있다.
 `/query`가 올바른 청크를 반환하는지 확인한 후, `/generate`로 LLM 품질을 분리하여 측정한다.
+`/discover`는 chunk 후보를 **문서 단위 후보 목록**으로만 돌려주며, 이 단계에서는 답변 생성·문서 선택 후 `/generate` 연동은 구현하지 않는다.
 
 ### 검색 계약 불변 원칙
 
@@ -54,6 +56,8 @@ question (원본, 사용자 입력)
 **목적:** 운영·개발자가 “왜 이 문서/chunk가 검색되었는지”를 설명·재현할 수 있게 한다.
 
 **구조화 로그 (항상):** `POST /api/v1/chat/query` 및 `POST /api/v1/chat/generate`의 검색 직후, `contexthub.chat.service` / `contexthub.agents.nas_rag` 로거로 한 줄 `retrieval_debug {…}` JSON이 출력된다. 필드에는 `original_query`, `retrieval_query`, `normalization_applied`, `retrieval_backend`, `retrieval_count`, `top_k`, `retrieved_chunk_ids`, `retrieved_document_ids`, `retrieval_scores`, `retrieval_filenames`, `retrieval_latency_ms`가 포함된다. **`chunk_text` 원문은 로그에 넣지 않는다** (메타만).
+
+`POST /api/v1/chat/discover`는 검색 직후 `contexthub.chat.discovery` 로거로 `chat_discover {…}` 한 줄을 남긴다. 필드: `original_query`, `retrieval_query`, `normalization_applied`, `document_count`, `retrieved_document_ids`, `top_scores`, `retrieval_backend`, `retrieval_latency_ms`. 역시 **chunk 본문 로그 없음**.
 
 **응답 `debug` (선택):** `ENABLE_RETRIEVAL_DEBUG=true`(기본 `false`)일 때만 응답 JSON에 `debug` 객체를 붙인다(`RetrievalDebugInfo`: 동일 메타 + `chunks` 배열; 역시 본문 없음). 운영에서는 끄고, 로컬·스테이징에서 Swagger로 원인 분석할 때 켠다.
 

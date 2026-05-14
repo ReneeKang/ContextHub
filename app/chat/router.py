@@ -5,7 +5,14 @@ from sqlalchemy.orm import Session
 
 from app.agents.nas_rag import NasRagLLMError, run_nas_rag_generate
 from app.chat.deps import get_db, get_search_client, get_settings_dep, resolve_stub_principal_for_chat
-from app.chat.schemas import ChatGenerateResponse, ChatQueryRequest, ChatQueryResponse
+from app.chat.discovery_service import run_discover
+from app.chat.schemas import (
+    ChatGenerateResponse,
+    ChatQueryRequest,
+    ChatQueryResponse,
+    DiscoverRequest,
+    DiscoverResponse,
+)
 from app.chat.service import ChatService
 from app.config.settings import Settings
 
@@ -22,6 +29,18 @@ def post_chat_query(
     principal = resolve_stub_principal_for_chat(body)
     service = ChatService(db, settings, search, principal)
     return service.query(body)
+
+
+@router.post("/discover", response_model=DiscoverResponse)
+def post_chat_discover(
+    body: DiscoverRequest,
+    db: Session = Depends(get_db),
+    settings: Settings = Depends(get_settings_dep),
+    search=Depends(get_search_client),
+) -> DiscoverResponse:
+    """Chunk retrieval grouped by document (no LLM). ``top_k`` is the chunk-level search limit."""
+    principal = resolve_stub_principal_for_chat(body)
+    return run_discover(db, settings, search, principal, body)
 
 
 @router.post("/generate", response_model=ChatGenerateResponse)

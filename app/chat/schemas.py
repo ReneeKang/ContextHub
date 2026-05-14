@@ -120,3 +120,54 @@ class ChatGenerateResponse(BaseModel):
         if data.get("debug") is None:
             data.pop("debug", None)
         return data
+
+
+# --- Document discovery (POST /api/v1/chat/discover) ---
+
+
+class DiscoverRequest(BaseModel):
+    """Chunk-level ``top_k`` for ``SearchClient.search`` (future: may split into top_k_chunks / top_k_documents)."""
+
+    question: str
+    top_k: int | None = Field(default=10, ge=1, le=50)
+    session_id: str | None = None
+    test_department_codes: list[str] | None = Field(
+        default=None,
+        description="Same stub principal semantics as ``ChatQueryRequest.test_department_codes``.",
+    )
+
+
+class DiscoverMatchedChunkItem(BaseModel):
+    chunk_id: UUID
+    chunk_no: int
+    section_title: str | None = None
+    page_no: int | None = None
+    score: float
+    highlights: dict[str, list[str]] | None = Field(
+        default=None,
+        description="Optional trimmed highlight fragments (no full chunk body).",
+    )
+
+
+class DiscoverDocumentItem(BaseModel):
+    raw_document_id: UUID
+    original_filename: str
+    path: str = Field(description="Preferred: ``inbox_path``; fallback stored path for display.")
+    project_key: str | None = Field(description="From ``/projects/{slug}/`` in path when present.")
+    access_scope: str
+    top_score: float
+    matched_chunk_count: int
+    representative_sections: list[str] = Field(description="Deduped section titles, max 3.")
+    matched_chunks: list[DiscoverMatchedChunkItem] = Field(
+        description="Top chunks by score for this document (capped, no chunk_text).",
+    )
+
+
+class DiscoverResponse(BaseModel):
+    original_query: str
+    retrieval_query: str
+    normalization_applied: bool
+    document_count: int
+    documents: list[DiscoverDocumentItem]
+    search_backend: SearchBackendLiteral
+    retrieval_latency_ms: int

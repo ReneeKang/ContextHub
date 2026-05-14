@@ -70,6 +70,7 @@ NAS 공식 반입 폴더
 | [parser-kordoc.md](parser-kordoc.md) | kordoc 역할 범위 · Parse Worker 연동 구조 |
 | [search-index.md](search-index.md) | 검색 인덱스 설계 · 권한 필터 검색 |
 | [retrieval-roadmap.md](retrieval-roadmap.md) | keyword retrieval MVP 이후 vector/hybrid retrieval 확장 방향 문서 |
+| [document-discovery.md](document-discovery.md) | 문서 탐색·선택 계층 설계 · chunk→document grouping · /discover API · project_key 추론 |
 | [admin-features.md](admin-features.md) | 관리자 최소 기능 요구사항 |
 | [document-versioning.md](document-versioning.md) | 문서 변경 감지 · 버전 전략 · 운영형 RAG 관행 |
 | [agent-architecture.md](agent-architecture.md) | Agent 레이어 구조 · 4단계 흐름 · trace_id · 멀티에이전트 확장 경로 |
