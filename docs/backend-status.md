@@ -10,7 +10,7 @@
 |-------------|------|-----------|
 | `POST /api/v1/chat/query` | **Retrieval 전용** 검증: 권한 필터 검색 + 스텁 형태의 `answer` (LLM 미호출) | `app/chat/router.py`, `app/chat/service.py` |
 | `POST /api/v1/chat/discover` | **문서 탐색 MVP**: 동일 `SearchClient.search`로 chunk 검색 후 `raw_document_id` 단위로 묶어 반환 (LLM 미호출, `chunk_text` 미포함) | `app/chat/router.py`, `app/chat/discovery_service.py` |
-| `POST /api/v1/chat/generate` | **RAG generation MVP**: 권한 반영 `SearchClient.search` → (선택) `document_ids`로 `raw_document_id` 필터 → 프롬프트·LLM. 응답에 `selected_document_ids`, `filtered_retrieval_count` 포함 | `app/chat/router.py`, `app/agents/nas_rag.py`, `app/chat/schemas.py` (`ChatGenerateRequest`) |
+| `POST /api/v1/chat/generate` | **RAG generation MVP**: 권한 반영 `SearchClient.search` → (선택) `document_ids`로 `raw_document_id` 필터 → 히트가 없으면 **선택 문서 chunk DB fallback**(동일 권한·색인 조건) → 프롬프트·LLM. 응답에 `selected_document_ids`, `filtered_retrieval_count` 포함 | `app/chat/router.py`, `app/agents/nas_rag.py`, `app/chat/selected_document_fallback.py`, `app/chat/schemas.py` (`ChatGenerateRequest`) |
 | `GET /api/v1/chat/history/{session_id}` | 미구현 (501) | `app/chat/router.py` |
 
 ### `/query`와 `/generate`를 분리한 이유

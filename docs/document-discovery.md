@@ -505,7 +505,7 @@ raw_document (문서 원본 메타)
 
 Phase 1에서 구현할 최소 범위.
 
-**현재 코드 기준 (document discovery + 선택 생성):** `POST /api/v1/chat/discover`로 문서 후보를 본 뒤, `POST /api/v1/chat/generate` 요청 본문의 **`document_ids`**(선택)에 `raw_document_id` 목록을 넣으면 **권한 반영 검색 결과에 대해** 해당 문서의 chunk만 프롬프트·`sources`·(옵션) `debug`에 사용한다. 필터 후 히트가 없으면 LLM을 호출하지 않는다.
+**현재 코드 기준 (document discovery + 선택 생성):** `POST /api/v1/chat/discover`로 문서 후보를 본 뒤, `POST /api/v1/chat/generate` 요청 본문의 **`document_ids`**(선택)에 `raw_document_id` 목록을 넣으면 **권한 반영 검색 결과에 대해** 해당 문서의 chunk만 프롬프트·`sources`·(옵션) `debug`에 사용한다. 키워드 검색·필터 후 히트가 없으면 **PostgreSQL에서 선택 문서의 앞쪽 chunk를 직접 로드**하는 fallback으로 지시어 중심 질문도 처리한다(동일 권한·색인 조건). 필터·fallback 모두 실패하면 LLM을 호출하지 않는다.
 
 | 항목 | 상태 |
 |------|------|

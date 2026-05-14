@@ -42,6 +42,7 @@ class _FakeSearchClient:
 class _RecordingLLM:
     def __init__(self) -> None:
         self.calls = 0
+        self.last_messages: list[LLMMessage] | None = None
 
     def complete(
         self,
@@ -51,8 +52,9 @@ class _RecordingLLM:
         max_tokens: int = 1024,
         temperature: float = 0.2,
     ) -> LLMCompletionResult:
-        _ = messages, model, max_tokens, temperature
+        _ = model, max_tokens, temperature
         self.calls += 1
+        self.last_messages = messages
         return LLMCompletionResult(text="synthetic-answer", model="mock")
 
 
@@ -258,6 +260,7 @@ def test_document_ids_no_match_after_search_skips_llm(monkeypatch: pytest.Monkey
         raise AssertionError("LLM must not run when document filter removes all chunks")
 
     monkeypatch.setattr(nas_rag, "get_llm_client", _boom)
+    monkeypatch.setattr(nas_rag, "load_chunks_for_selected_documents", lambda *a, **k: [])
     rid_in_index = uuid4()
     rid_requested = uuid4()
     hits = [
@@ -285,17 +288,88 @@ def test_document_ids_no_match_after_search_skips_llm(monkeypatch: pytest.Monkey
     assert out.selected_document_ids == [str(rid_requested)]
 
 
-def test_document_ids_empty_search_still_zero_hit_not_filtered_message(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_document_ids_empty_search_uses_filtered_message_when_no_fallback_chunks(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     def _boom(_settings: Settings) -> object:
         raise AssertionError("get_llm_client must not run")
 
     monkeypatch.setattr(nas_rag, "get_llm_client", _boom)
+    monkeypatch.setattr(nas_rag, "load_chunks_for_selected_documents", lambda *a, **k: [])
     rid = uuid4()
     settings = Settings(llm_mock_mode=True, search_backend="db")
     body = ChatGenerateRequest(question="q", document_ids=[rid])
     principal = PermissionPrincipal(user_id="stub-user", department_codes=())
     session = MagicMock()
     out = nas_rag.run_nas_rag_generate(session, settings, _FakeSearchClient([]), principal, body)
-    assert "검색된 내부 문서 발췌가 없어" in out.answer
+    assert "선택한 문서" in out.answer
     assert out.filtered_retrieval_count == 0
     assert out.selected_document_ids == [str(rid)]
+
+
+def test_document_ids_pronoun_question_invokes_llm_via_fallback_chunks(monkeypatch: pytest.MonkeyPatch) -> None:
+    rid = uuid4()
+    cid = uuid4()
+    fb = [
+        SearchHit(
+            chunk_id=cid,
+            raw_document_id=rid,
+            original_filename="tailoring.xlsx",
+            chunk_no=1,
+            section_title="산출물",
+            page_no=None,
+            chunk_text="TAILORING_BODY_FOR_MODEL",
+            access_scope="PUBLIC",
+            score=0.0,
+            highlights=None,
+        )
+    ]
+
+    def _fake_load(session, principal, document_ids, *, top_k):
+        _ = session, principal, top_k
+        assert rid in document_ids
+        return fb
+
+    llm = _RecordingLLM()
+    monkeypatch.setattr(nas_rag, "get_llm_client", lambda _s: llm)
+    monkeypatch.setattr(nas_rag, "load_chunks_for_selected_documents", _fake_load)
+    settings = Settings(llm_mock_mode=True, search_backend="db")
+    body = ChatGenerateRequest(
+        question="이 문서의 주요 산출물을 설명해줘",
+        document_ids=[rid],
+        top_k=5,
+    )
+    principal = PermissionPrincipal(user_id="stub-user", department_codes=())
+    session = MagicMock()
+    out = nas_rag.run_nas_rag_generate(session, settings, _FakeSearchClient([]), principal, body)
+    assert llm.calls == 1
+    assert out.filtered_retrieval_count == 1
+    assert len(out.sources) == 1
+    assert out.sources[0].raw_document_id == rid
+    assert out.sources[0].chunk_id == cid
+    assert llm.last_messages is not None
+    user_content = llm.last_messages[1].content
+    assert "이 문서의 주요 산출물을 설명해줘" in user_content
+    assert "TAILORING_BODY_FOR_MODEL" in user_content
+
+
+def test_fallback_loader_receives_principal_for_permission_enforcement(monkeypatch: pytest.MonkeyPatch) -> None:
+    captured: list[tuple[PermissionPrincipal, list]] = []
+
+    def _capture(session, principal, document_ids, *, top_k):
+        _ = session, top_k
+        captured.append((principal, list(document_ids)))
+        return []
+
+    monkeypatch.setattr(nas_rag, "get_llm_client", lambda _s: MagicMock())
+    monkeypatch.setattr(nas_rag, "load_chunks_for_selected_documents", _capture)
+    rid = uuid4()
+    settings = Settings(llm_mock_mode=True, search_backend="db")
+    body = ChatGenerateRequest(question="q", document_ids=[rid])
+    principal = PermissionPrincipal(user_id="u-1", department_codes=("infra",))
+    session = MagicMock()
+    nas_rag.run_nas_rag_generate(session, settings, _FakeSearchClient([]), principal, body)
+    assert len(captured) == 1
+    assert captured[0][0].user_id == "u-1"
+    assert captured[0][0].department_codes == ("infra",)
+    assert captured[0][1] == [rid]

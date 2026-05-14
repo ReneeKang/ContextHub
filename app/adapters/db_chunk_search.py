@@ -59,6 +59,11 @@ def _permission_filter(principal: PermissionPrincipal):
     return or_(public, dept, private)
 
 
+def document_chunk_read_permission_predicate(principal: PermissionPrincipal):
+    """Public alias for the same SQL predicate used by ``DbChunkSearchClient`` (e.g. selected-document fallback)."""
+    return _permission_filter(principal)
+
+
 class DbChunkSearchClient(SearchClient):
     """SearchClient implementation using document_chunk + raw_document (no OpenSearch)."""
 

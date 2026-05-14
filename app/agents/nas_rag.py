@@ -15,6 +15,7 @@ from app.chat.retrieval_debug import (
 )
 from app.chat.retrieval_query import format_query_log_snippet, normalize_retrieval_query_pair
 from app.chat.schemas import ChatGenerateResponse, ChatQueryRequest, ChatSourceItem
+from app.chat.selected_document_fallback import load_chunks_for_selected_documents
 from app.config.settings import Settings
 from app.llm.backend import get_llm_client
 from app.llm.protocol import LLMMessage
@@ -136,8 +137,9 @@ def run_nas_rag_generate(
 
     Does not parse citations from model output; ``sources`` mirror retrieval hits
     (after optional ``document_ids`` filter when ``body`` is a :class:`~app.chat.schemas.ChatGenerateRequest`).
+    When ``document_ids`` is set and filtered retrieval is empty, loads early chunks from PostgreSQL
+    (same permission rules as DB search) so pronoun-style questions still receive context.
     """
-    _ = session
     t0 = time.perf_counter()
     original_q = body.question
     retrieval_q, norm_applied = normalize_retrieval_query_pair(original_q)
@@ -153,6 +155,15 @@ def run_nas_rag_generate(
         top_k=top_k,
     )
     hits = _apply_document_filter(raw_hits, doc_ids)
+    used_selected_document_fallback = False
+    if doc_ids and not hits:
+        fb = load_chunks_for_selected_documents(
+            session, principal, doc_ids, top_k=top_k
+        )
+        if fb:
+            hits = fb
+            used_selected_document_fallback = True
+
     sources = _sources_from_hits(hits)
     rb = settings.search_backend
     rec = build_retrieval_debug_log_record(
@@ -164,6 +175,8 @@ def run_nas_rag_generate(
         hits=hits,
         retrieval_latency_ms=retrieval_ms,
     )
+    if used_selected_document_fallback:
+        rec = {**rec, "selected_document_fallback_used": True}
     log_retrieval_debug(log, rec)
     dbg = (
         build_retrieval_debug_for_response(
@@ -181,18 +194,18 @@ def run_nas_rag_generate(
 
     if not hits:
         total_ms = int((time.perf_counter() - t0) * 1000)
-        filtered_out_all = bool(doc_ids) and bool(raw_hits)
-        answer = FILTERED_EMPTY_ANSWER_KO if filtered_out_all else ZERO_HIT_ANSWER_KO
+        answer = FILTERED_EMPTY_ANSWER_KO if doc_ids else ZERO_HIT_ANSWER_KO
         log.info(
             "nas_rag_generate original_query=%r retrieval_query=%r normalization_applied=%s "
-            "retrieval_count=%s raw_retrieval_count=%s document_filter=%s retrieval_ms=%s "
-            "used_chunk_ids=[] llm_model=%s llm_mock=%s latency_ms=%s",
+            "retrieval_count=%s raw_retrieval_count=%s document_filter=%s selected_doc_fallback=%s "
+            "retrieval_ms=%s used_chunk_ids=[] llm_model=%s llm_mock=%s latency_ms=%s",
             format_query_log_snippet(original_q),
             format_query_log_snippet(retrieval_q),
             norm_applied,
             len(hits),
             len(raw_hits),
             bool(doc_ids),
+            used_selected_document_fallback,
             retrieval_ms,
             None,
             False,
@@ -251,13 +264,15 @@ def run_nas_rag_generate(
     used_ids = [str(h.chunk_id) for h in hits]
     log.info(
         "nas_rag_generate original_query=%r retrieval_query=%r normalization_applied=%s retrieval_count=%s "
-        "raw_retrieval_count=%s document_filter=%s retrieval_ms=%s used_chunk_ids=%s llm_model=%s llm_mock=%s latency_ms=%s",
+        "raw_retrieval_count=%s document_filter=%s selected_doc_fallback=%s retrieval_ms=%s "
+        "used_chunk_ids=%s llm_model=%s llm_mock=%s latency_ms=%s",
         format_query_log_snippet(original_q),
         format_query_log_snippet(retrieval_q),
         norm_applied,
         len(hits),
         len(raw_hits),
         bool(doc_ids),
+        used_selected_document_fallback,
         retrieval_ms,
         used_ids,
         result.model,
