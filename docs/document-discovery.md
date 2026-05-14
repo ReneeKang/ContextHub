@@ -505,7 +505,7 @@ raw_document (문서 원본 메타)
 
 Phase 1에서 구현할 최소 범위.
 
-**현재 코드 기준 (document discovery):** `POST /api/v1/chat/discover`는 `SearchClient.search` → `raw_document_id` 그룹화, `project_key` 경로 추론, 구조화 로그(`chat_discover`)까지 구현됨. `/generate`에 `document_ids` 필터를 넘기는 단계는 아직 없다.
+**현재 코드 기준 (document discovery + 선택 생성):** `POST /api/v1/chat/discover`로 문서 후보를 본 뒤, `POST /api/v1/chat/generate` 요청 본문의 **`document_ids`**(선택)에 `raw_document_id` 목록을 넣으면 **권한 반영 검색 결과에 대해** 해당 문서의 chunk만 프롬프트·`sources`·(옵션) `debug`에 사용한다. 필터 후 히트가 없으면 LLM을 호출하지 않는다.
 
 | 항목 | 상태 |
 |------|------|
@@ -513,7 +513,7 @@ Phase 1에서 구현할 최소 범위.
 | `DocumentCandidate` 데이터클래스 | `DiscoverDocumentItem` 등 응답 스키마로 동일 역할 |
 | `infer_project_key(inbox_path)` 유틸 | **MVP 구현됨** |
 | `POST /api/v1/chat/discover` 엔드포인트 | **MVP 구현됨** |
-| `document_ids` 필터 (`/generate` 확장) | 미구현 (차후) |
+| `document_ids` 필터 (`/generate` 확장) | **MVP 구현됨** (`ChatGenerateRequest` + `run_nas_rag_generate` 후처리) |
 | `representative_sections` 집계 | **MVP 구현됨** |
 | SearchClient 계약 | 변경 없음 |
 | scanner / parser / chunker / indexer | 변경 없음 |
@@ -535,8 +535,7 @@ app/
 ```
 
 `app/agents/nas_rag.py`:
-- `run_nas_rag_generate()`에 `document_ids: list[str] | None` 파라미터 추가
-- 있으면 hits를 document_ids 기준으로 필터 후 LLM 호출
+- `run_nas_rag_generate()`는 `ChatGenerateRequest`(또는 동일 필드를 가진 요청)를 받는다. 선택 필드 **`document_ids`**가 있으면 `SearchClient.search` 결과(이미 권한 필터됨)를 `raw_document_id`로 한 번 더 걸러 LLM·`sources`·`retrieval_debug`에 반영한다.
 
 ---
 

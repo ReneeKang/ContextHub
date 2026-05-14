@@ -10,7 +10,7 @@ import pytest
 
 from app.adapters.search_protocol import PermissionPrincipal, SearchHit
 from app.agents import nas_rag
-from app.chat.schemas import ChatQueryRequest
+from app.chat.schemas import ChatGenerateRequest, ChatQueryRequest
 from app.config.settings import Settings
 from app.llm.protocol import LLMCompletionResult, LLMMessage
 
@@ -92,6 +92,8 @@ def test_zero_hits_does_not_call_get_llm_client(monkeypatch: pytest.MonkeyPatch,
     assert "검색된 내부 문서 발췌가 없어" in out.answer
     assert out.sources == []
     assert out.llm_latency_ms is None
+    assert out.filtered_retrieval_count == 0
+    assert out.selected_document_ids is None
     assert "SECRET_CHUNK" not in caplog.text
 
 
@@ -125,6 +127,8 @@ def test_hits_invoke_llm_and_sources_mirror_hits(monkeypatch: pytest.MonkeyPatch
     assert len(out.sources) == 1
     assert out.sources[0].chunk_id == cid
     assert out.sources[0].raw_document_id == rid
+    assert out.filtered_retrieval_count == 1
+    assert out.selected_document_ids is None
     assert "SECRET_CHUNK_BODY_XYZ" not in caplog.text
 
 
@@ -187,3 +191,111 @@ def test_llm_failure_logs_error_type_and_message(monkeypatch: pytest.MonkeyPatch
     assert "error_type=ValueError" in joined
     assert "error_message=" in joined
     assert "SECRET" not in joined
+
+
+def test_document_ids_filters_prompt_and_sources(monkeypatch: pytest.MonkeyPatch) -> None:
+    rid_a = uuid4()
+    rid_b = uuid4()
+    cid_a = uuid4()
+    cid_b = uuid4()
+    hits = [
+        SearchHit(
+            chunk_id=cid_a,
+            raw_document_id=rid_a,
+            original_filename="a.txt",
+            chunk_no=1,
+            section_title=None,
+            page_no=None,
+            chunk_text="DOC_A_ONLY",
+            access_scope="PUBLIC",
+            score=1.0,
+            highlights=None,
+        ),
+        SearchHit(
+            chunk_id=cid_b,
+            raw_document_id=rid_b,
+            original_filename="b.txt",
+            chunk_no=1,
+            section_title=None,
+            page_no=None,
+            chunk_text="DOC_B_ONLY",
+            access_scope="PUBLIC",
+            score=2.0,
+            highlights=None,
+        ),
+    ]
+    captured: list[list[LLMMessage]] = []
+
+    class _Cap:
+        def complete(
+            self,
+            *,
+            messages: list[LLMMessage],
+            model: str,
+            max_tokens: int = 1024,
+            temperature: float = 0.2,
+        ) -> LLMCompletionResult:
+            captured.append(messages)
+            return LLMCompletionResult(text="ok", model="m")
+
+    monkeypatch.setattr(nas_rag, "get_llm_client", lambda _s: _Cap())
+    settings = Settings(llm_mock_mode=True, search_backend="db")
+    body = ChatGenerateRequest(question="q", document_ids=[rid_b])
+    principal = PermissionPrincipal(user_id="stub-user", department_codes=())
+    session = MagicMock()
+    out = nas_rag.run_nas_rag_generate(session, settings, _FakeSearchClient(hits), principal, body)
+    assert len(out.sources) == 1
+    assert out.sources[0].raw_document_id == rid_b
+    assert out.filtered_retrieval_count == 1
+    assert out.selected_document_ids == [str(rid_b)]
+    user_content = captured[0][1].content
+    assert "DOC_B_ONLY" in user_content
+    assert "DOC_A_ONLY" not in user_content
+
+
+def test_document_ids_no_match_after_search_skips_llm(monkeypatch: pytest.MonkeyPatch) -> None:
+    def _boom(_settings: Settings) -> object:
+        raise AssertionError("LLM must not run when document filter removes all chunks")
+
+    monkeypatch.setattr(nas_rag, "get_llm_client", _boom)
+    rid_in_index = uuid4()
+    rid_requested = uuid4()
+    hits = [
+        SearchHit(
+            chunk_id=uuid4(),
+            raw_document_id=rid_in_index,
+            original_filename="x.txt",
+            chunk_no=1,
+            section_title=None,
+            page_no=None,
+            chunk_text="BODY",
+            access_scope="PUBLIC",
+            score=1.0,
+            highlights=None,
+        )
+    ]
+    settings = Settings(llm_mock_mode=True, search_backend="db")
+    body = ChatGenerateRequest(question="q", document_ids=[rid_requested])
+    principal = PermissionPrincipal(user_id="stub-user", department_codes=())
+    session = MagicMock()
+    out = nas_rag.run_nas_rag_generate(session, settings, _FakeSearchClient(hits), principal, body)
+    assert "선택한 문서" in out.answer
+    assert out.sources == []
+    assert out.filtered_retrieval_count == 0
+    assert out.selected_document_ids == [str(rid_requested)]
+
+
+def test_document_ids_empty_search_still_zero_hit_not_filtered_message(monkeypatch: pytest.MonkeyPatch) -> None:
+    def _boom(_settings: Settings) -> object:
+        raise AssertionError("get_llm_client must not run")
+
+    monkeypatch.setattr(nas_rag, "get_llm_client", _boom)
+    rid = uuid4()
+    settings = Settings(llm_mock_mode=True, search_backend="db")
+    body = ChatGenerateRequest(question="q", document_ids=[rid])
+    principal = PermissionPrincipal(user_id="stub-user", department_codes=())
+    session = MagicMock()
+    out = nas_rag.run_nas_rag_generate(session, settings, _FakeSearchClient([]), principal, body)
+    assert "검색된 내부 문서 발췌가 없어" in out.answer
+    assert out.filtered_retrieval_count == 0
+    assert out.selected_document_ids == [str(rid)]

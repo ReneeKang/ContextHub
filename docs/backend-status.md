@@ -10,7 +10,7 @@
 |-------------|------|-----------|
 | `POST /api/v1/chat/query` | **Retrieval 전용** 검증: 권한 필터 검색 + 스텁 형태의 `answer` (LLM 미호출) | `app/chat/router.py`, `app/chat/service.py` |
 | `POST /api/v1/chat/discover` | **문서 탐색 MVP**: 동일 `SearchClient.search`로 chunk 검색 후 `raw_document_id` 단위로 묶어 반환 (LLM 미호출, `chunk_text` 미포함) | `app/chat/router.py`, `app/chat/discovery_service.py` |
-| `POST /api/v1/chat/generate` | **RAG generation MVP**: 동일 검색 계약으로 히트 조회 후 LLM 호출(또는 mock) | `app/chat/router.py`, `app/agents/nas_rag.py` |
+| `POST /api/v1/chat/generate` | **RAG generation MVP**: 권한 반영 `SearchClient.search` → (선택) `document_ids`로 `raw_document_id` 필터 → 프롬프트·LLM. 응답에 `selected_document_ids`, `filtered_retrieval_count` 포함 | `app/chat/router.py`, `app/agents/nas_rag.py`, `app/chat/schemas.py` (`ChatGenerateRequest`) |
 | `GET /api/v1/chat/history/{session_id}` | 미구현 (501) | `app/chat/router.py` |
 
 ### `/query`와 `/generate`를 분리한 이유
@@ -26,7 +26,7 @@
 
 이 분리 덕분에 **LLM이 없어도 검색 파이프라인을 독립적으로 검증**할 수 있다.
 `/query`가 올바른 청크를 반환하는지 확인한 후, `/generate`로 LLM 품질을 분리하여 측정한다.
-`/discover`는 chunk 후보를 **문서 단위 후보 목록**으로만 돌려주며, 이 단계에서는 답변 생성·문서 선택 후 `/generate` 연동은 구현하지 않는다.
+`/discover`는 chunk 후보를 **문서 단위 후보 목록**으로 돌려준 뒤, 사용자가 `raw_document_id`를 고르면 **`POST /api/v1/chat/generate`**에 `document_ids`로 넘겨 해당 문서의 검색 히트만으로 답변을 생성할 수 있다(자동 파이프라인 없음; 클라이언트가 두 API를 순서대로 호출).
 
 ### 검색 계약 불변 원칙
 
@@ -55,7 +55,7 @@ question (원본, 사용자 입력)
 
 **목적:** 운영·개발자가 “왜 이 문서/chunk가 검색되었는지”를 설명·재현할 수 있게 한다.
 
-**구조화 로그 (항상):** `POST /api/v1/chat/query` 및 `POST /api/v1/chat/generate`의 검색 직후, `contexthub.chat.service` / `contexthub.agents.nas_rag` 로거로 한 줄 `retrieval_debug {…}` JSON이 출력된다. 필드에는 `original_query`, `retrieval_query`, `normalization_applied`, `retrieval_backend`, `retrieval_count`, `top_k`, `retrieved_chunk_ids`, `retrieved_document_ids`, `retrieval_scores`, `retrieval_filenames`, `retrieval_latency_ms`가 포함된다. **`chunk_text` 원문은 로그에 넣지 않는다** (메타만).
+**구조화 로그 (항상):** `POST /api/v1/chat/query` 및 `POST /api/v1/chat/generate`의 검색 직후, `contexthub.chat.service` / `contexthub.agents.nas_rag` 로거로 한 줄 `retrieval_debug {…}` JSON이 출력된다. 필드에는 `original_query`, `retrieval_query`, `normalization_applied`, `retrieval_backend`, `retrieval_count`, `top_k`, `retrieved_chunk_ids`, `retrieved_document_ids`, `retrieval_scores`, `retrieval_filenames`, `retrieval_latency_ms`가 포함된다. **`chunk_text` 원문은 로그에 넣지 않는다** (메타만). `/generate`에서 `document_ids`를 쓴 경우 `retrieval_count` 등은 **문서 필터 적용 후** 실제로 사용된 히트 기준이다.
 
 `POST /api/v1/chat/discover`는 검색 직후 `contexthub.chat.discovery` 로거로 `chat_discover {…}` 한 줄을 남긴다. 필드: `original_query`, `retrieval_query`, `normalization_applied`, `document_count`, `retrieved_document_ids`, `top_scores`, `retrieval_backend`, `retrieval_latency_ms`. 역시 **chunk 본문 로그 없음**.
 
@@ -250,20 +250,25 @@ retrieval 품질 개선을 위해 **scanner, parser, chunker, indexer를 수정�
 
 1. API 기동: `uvicorn app.main:app --reload --host 0.0.0.0 --port 8000`
 2. `http://127.0.0.1:8000/docs` → **chat** → `POST /api/v1/chat/generate`
-3. Request body는 **`POST /api/v1/chat/query`와 동일**하며, 스키마는 `app/chat/schemas.py`의 **`ChatQueryRequest`**. **필수 필드는 `question`** (문자열). 선택: `top_k`, `session_id`, `test_department_codes`.
+3. Request body는 **`ChatGenerateRequest`** (`ChatQueryRequest` 필드 + 선택 `document_ids`). **`question`** 필수. 선택: `top_k`, `session_id`, `test_department_codes`, **`document_ids`** (`raw_document_id` UUID 배열; 생략 시 전체 검색 히트로 생성).
 
 ```json
 {
   "question": "Kubeflow 워크플로우",
   "top_k": 5,
   "session_id": null,
-  "test_department_codes": null
+  "test_department_codes": null,
+  "document_ids": ["f44d094c-4fa3-42b3-aa15-a01c125c9400"]
 }
 ```
 
+`document_ids`는 `/discover` 응답의 문서를 고른 뒤 Swagger에서 붙이는 용도다. 권한 필터를 통과한 검색 결과에 없는 ID만 넘기면 히트가 비고 LLM은 호출되지 않는다.
+
 `test_department_codes`는 생략하거나 DEPT 스텁 검증 시 `["infra"]`처럼 배열을 넣을 수 있다.
 
-응답(`ChatGenerateResponse`): `answer`, `sources`, `search_backend`, `llm_model`, `llm_mock`, `retrieval_latency_ms`, `llm_latency_ms`, `total_latency_ms`.
+응답(`ChatGenerateResponse`): `answer`, `sources`, `search_backend`, `llm_model`, `llm_mock`, `retrieval_latency_ms`, `llm_latency_ms`, `total_latency_ms`, **`selected_document_ids`**(요청에 `document_ids`가 있었을 때 UUID 문자열 목록), **`filtered_retrieval_count`**(문서 필터 후 실제 사용 청크 수).
+
+**흐름 예:** `POST /discover`로 후보 문서·`raw_document_id` 확인 → 사용자 선택 → `POST /generate`에 동일 질의(또는 후속 질의)와 `document_ids`를 넣어 해당 문서 근거만으로 답변.
 
 ---
 

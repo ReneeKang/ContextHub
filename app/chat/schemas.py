@@ -23,6 +23,19 @@ class ChatQueryRequest(BaseModel):
     )
 
 
+class ChatGenerateRequest(ChatQueryRequest):
+    """``POST /api/v1/chat/generate`` body: same as ``ChatQueryRequest`` plus optional document-scoped retrieval."""
+
+    document_ids: list[UUID] | None = Field(
+        default=None,
+        max_length=50,
+        description=(
+            "When non-empty, only chunks whose ``raw_document_id`` is in this set are used for the LLM prompt "
+            "(filter applied **after** permission-aware ``SearchClient.search``). Omit or null for full retrieval."
+        ),
+    )
+
+
 class ChatSourceItem(BaseModel):
     chunk_id: UUID
     raw_document_id: UUID
@@ -109,6 +122,15 @@ class ChatGenerateResponse(BaseModel):
     retrieval_latency_ms: int
     llm_latency_ms: int | None = Field(default=None, description="Null when LLM was not invoked (e.g. zero hits).")
     total_latency_ms: int
+    selected_document_ids: list[str] | None = Field(
+        default=None,
+        description="Echo of requested ``document_ids`` (UUID strings) when the client sent a non-empty list; null otherwise.",
+    )
+    filtered_retrieval_count: int = Field(
+        default=0,
+        ge=0,
+        description="Chunk count after optional ``document_ids`` filter (what the LLM saw when invoked).",
+    )
     debug: RetrievalDebugInfo | None = Field(
         default=None,
         description="Present only when ENABLE_RETRIEVAL_DEBUG=true; omitted from JSON when null.",

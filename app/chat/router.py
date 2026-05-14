@@ -7,6 +7,7 @@ from app.agents.nas_rag import NasRagLLMError, run_nas_rag_generate
 from app.chat.deps import get_db, get_search_client, get_settings_dep, resolve_stub_principal_for_chat
 from app.chat.discovery_service import run_discover
 from app.chat.schemas import (
+    ChatGenerateRequest,
     ChatGenerateResponse,
     ChatQueryRequest,
     ChatQueryResponse,
@@ -45,7 +46,7 @@ def post_chat_discover(
 
 @router.post("/generate", response_model=ChatGenerateResponse)
 def post_chat_generate(
-    body: ChatQueryRequest,
+    body: ChatGenerateRequest,
     db: Session = Depends(get_db),
     settings: Settings = Depends(get_settings_dep),
     search=Depends(get_search_client),
