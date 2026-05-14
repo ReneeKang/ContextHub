@@ -1,10 +1,16 @@
 from __future__ import annotations
 
 import logging
+import time
 
 from sqlalchemy.orm import Session
 
 from app.adapters.search_protocol import PermissionPrincipal, SearchClient, SearchHit
+from app.chat.retrieval_debug import (
+    build_retrieval_debug_for_response,
+    build_retrieval_debug_log_record,
+    log_retrieval_debug,
+)
 from app.chat.retrieval_query import format_query_log_snippet, normalize_retrieval_query_pair
 from app.chat.schemas import ChatQueryRequest, ChatQueryResponse, ChatSourceItem
 from app.config.settings import Settings
@@ -55,19 +61,32 @@ class ChatService:
         top_k = body.top_k or 5
         original_q = body.question
         retrieval_q, norm_applied = normalize_retrieval_query_pair(original_q)
+        t0 = time.perf_counter()
         hits = self._search.search(
             query=retrieval_q,
             top_k=top_k,
             principal=self._principal,
             index_name=self._settings.search_index_name,
         )
+        retrieval_ms = int((time.perf_counter() - t0) * 1000)
+        rb = self._settings.search_backend
+        rec = build_retrieval_debug_log_record(
+            original_query=original_q,
+            retrieval_query=retrieval_q,
+            normalization_applied=norm_applied,
+            retrieval_backend=rb,
+            top_k=top_k,
+            hits=hits,
+            retrieval_latency_ms=retrieval_ms,
+        )
+        log_retrieval_debug(log, rec)
         log.info(
             "chat_query original_query=%r retrieval_query=%r normalization_applied=%s retrieval_count=%s search_backend=%s",
             format_query_log_snippet(original_q),
             format_query_log_snippet(retrieval_q),
             norm_applied,
             len(hits),
-            self._settings.search_backend,
+            rb,
         )
         sources = [
             ChatSourceItem(
@@ -84,9 +103,23 @@ class ChatService:
             for h in hits
         ]
         answer = _build_stub_answer(question=body.question, hits=hits)
+        dbg = (
+            build_retrieval_debug_for_response(
+                original_query=original_q,
+                retrieval_query=retrieval_q,
+                normalization_applied=norm_applied,
+                retrieval_backend=rb,
+                top_k=top_k,
+                hits=hits,
+                retrieval_latency_ms=retrieval_ms,
+            )
+            if self._settings.enable_retrieval_debug
+            else None
+        )
         return ChatQueryResponse(
             answer=answer,
             search_backend=self._settings.search_backend,
             sources=sources,
             session_id=body.session_id,
+            debug=dbg,
         )

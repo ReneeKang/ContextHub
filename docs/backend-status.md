@@ -49,6 +49,18 @@ question (원본, 사용자 입력)
 - 정규화된 검색어(`"방화벽 포트 오픈"`)를 LLM에게 넘기면 사용자 의도가 잘린다
 - LLM은 `"방화벽 포트 오픈 설명해줘"`라는 자연어 질문 전체를 컨텍스트로 써야 더 나은 답변을 생성한다
 
+### Retrieval Debug / Observability
+
+**목적:** 운영·개발자가 “왜 이 문서/chunk가 검색되었는지”를 설명·재현할 수 있게 한다.
+
+**구조화 로그 (항상):** `POST /api/v1/chat/query` 및 `POST /api/v1/chat/generate`의 검색 직후, `contexthub.chat.service` / `contexthub.agents.nas_rag` 로거로 한 줄 `retrieval_debug {…}` JSON이 출력된다. 필드에는 `original_query`, `retrieval_query`, `normalization_applied`, `retrieval_backend`, `retrieval_count`, `top_k`, `retrieved_chunk_ids`, `retrieved_document_ids`, `retrieval_scores`, `retrieval_filenames`, `retrieval_latency_ms`가 포함된다. **`chunk_text` 원문은 로그에 넣지 않는다** (메타만).
+
+**응답 `debug` (선택):** `ENABLE_RETRIEVAL_DEBUG=true`(기본 `false`)일 때만 응답 JSON에 `debug` 객체를 붙인다(`RetrievalDebugInfo`: 동일 메타 + `chunks` 배열; 역시 본문 없음). 운영에서는 끄고, 로컬·스테이징에서 Swagger로 원인 분석할 때 켠다.
+
+**활용 예:** retrieval 품질·정규화 효과 분석, vector/hybrid 전환 전 BM25 기준선 검증, 운영 장애(0건·권한) 분석, hallucination과의 대조를 위한 **source 추적**, 감사 대응 시 “어떤 질의로 어떤 chunk_id가 매칭됐는지” 입증.
+
+구현: `app/chat/retrieval_debug.py`, `Settings.enable_retrieval_debug`, `app/chat/schemas.py`의 `RetrievalDebugInfo`.
+
 ---
 
 ## 2. `app/llm` — LLM 게이트웨이 (MVP)

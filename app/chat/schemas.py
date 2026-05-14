@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from uuid import UUID
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_serializer
 
 from app.config.settings import SearchBackendLiteral
 
@@ -41,6 +41,37 @@ class ChatSourceItem(BaseModel):
     )
 
 
+class RetrievalDebugChunkItem(BaseModel):
+    """Chunk metadata for retrieval debug (no ``chunk_text``)."""
+
+    chunk_id: UUID
+    raw_document_id: UUID
+    original_filename: str
+    chunk_no: int
+    section_title: str | None = None
+    page_no: int | None = None
+    score: float
+    access_scope: str
+    highlights: dict[str, list[str]] | None = None
+
+
+class RetrievalDebugInfo(BaseModel):
+    """Returned as ``debug`` when ``ENABLE_RETRIEVAL_DEBUG=true`` (dev / ops)."""
+
+    original_query: str
+    retrieval_query: str
+    normalization_applied: bool
+    backend: str = Field(description="Same as ``search_backend`` / ``retrieval_backend`` in logs.")
+    retrieval_count: int
+    top_k: int
+    retrieval_latency_ms: int
+    retrieved_chunk_ids: list[str]
+    retrieved_document_ids: list[str]
+    retrieval_scores: list[float]
+    retrieval_filenames: list[str]
+    chunks: list[RetrievalDebugChunkItem]
+
+
 class ChatQueryResponse(BaseModel):
     answer: str
     search_backend: SearchBackendLiteral = Field(
@@ -51,6 +82,17 @@ class ChatQueryResponse(BaseModel):
     )
     sources: list[ChatSourceItem]
     session_id: str | None = None
+    debug: RetrievalDebugInfo | None = Field(
+        default=None,
+        description="Present only when ENABLE_RETRIEVAL_DEBUG=true; omitted from JSON when null.",
+    )
+
+    @model_serializer(mode="wrap")
+    def _serialize_omit_null_debug(self, serializer):
+        data = serializer(self)
+        if data.get("debug") is None:
+            data.pop("debug", None)
+        return data
 
 
 class ChatGenerateResponse(BaseModel):
@@ -67,3 +109,14 @@ class ChatGenerateResponse(BaseModel):
     retrieval_latency_ms: int
     llm_latency_ms: int | None = Field(default=None, description="Null when LLM was not invoked (e.g. zero hits).")
     total_latency_ms: int
+    debug: RetrievalDebugInfo | None = Field(
+        default=None,
+        description="Present only when ENABLE_RETRIEVAL_DEBUG=true; omitted from JSON when null.",
+    )
+
+    @model_serializer(mode="wrap")
+    def _serialize_omit_null_debug(self, serializer):
+        data = serializer(self)
+        if data.get("debug") is None:
+            data.pop("debug", None)
+        return data

@@ -6,6 +6,7 @@ Uses FastAPI TestClient + dependency overrides (no live DB/OpenSearch).
 
 from __future__ import annotations
 
+import json
 import logging
 import uuid
 from collections.abc import Generator
@@ -108,12 +109,21 @@ def test_chat_query_variants_same_documents_and_log_fields(
     assert search.search_queries == ["방화벽 포트 오픈"] * len(_VARIANTS)
 
     svc_logs = [r.getMessage() for r in caplog.records if r.name == "contexthub.chat.service"]
-    assert len(svc_logs) >= len(_VARIANTS)
-    for msg in svc_logs[-len(_VARIANTS) :]:
+    chat_query_logs = [m for m in svc_logs if m.startswith("chat_query")]
+    assert len(chat_query_logs) >= len(_VARIANTS)
+    for msg in chat_query_logs[-len(_VARIANTS) :]:
         assert "original_query=" in msg
         assert "retrieval_query=" in msg
         assert "normalization_applied=" in msg
         assert "retrieval_count=" in msg
+
+    rd_logs = [m for m in svc_logs if m.startswith("retrieval_debug ")]
+    assert len(rd_logs) >= len(_VARIANTS)
+    for msg in rd_logs[-len(_VARIANTS) :]:
+        payload = json.loads(msg[len("retrieval_debug ") :])
+        assert payload["retrieval_query"] == "방화벽 포트 오픈"
+        assert payload["retrieval_backend"] in ("db", "opensearch", "opensearch_stub")
+        assert "retrieval_latency_ms" in payload
 
 
 def test_chat_generate_variants_same_documents_logs_and_prompt_uses_original(
@@ -155,9 +165,16 @@ def test_chat_generate_variants_same_documents_logs_and_prompt_uses_original(
         assert f"QUESTION:\n{q}\n" in user
 
     rag_logs = [r.getMessage() for r in caplog.records if r.name == "contexthub.agents.nas_rag"]
-    assert len(rag_logs) >= len(_VARIANTS)
-    for msg in rag_logs[-len(_VARIANTS) :]:
+    gen_logs = [m for m in rag_logs if "nas_rag_generate" in m]
+    assert len(gen_logs) >= len(_VARIANTS)
+    for msg in gen_logs[-len(_VARIANTS) :]:
         assert "original_query=" in msg
         assert "retrieval_query=" in msg
         assert "normalization_applied=" in msg
         assert "retrieval_count=" in msg
+
+    rd_logs = [m for m in rag_logs if m.startswith("retrieval_debug ")]
+    assert len(rd_logs) >= len(_VARIANTS)
+    for msg in rd_logs[-len(_VARIANTS) :]:
+        payload = json.loads(msg[len("retrieval_debug ") :])
+        assert payload["retrieval_query"] == "방화벽 포트 오픈"

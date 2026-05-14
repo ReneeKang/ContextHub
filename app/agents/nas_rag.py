@@ -1,11 +1,17 @@
 from __future__ import annotations
 
+import json
 import logging
 import time
 
 from sqlalchemy.orm import Session
 
 from app.adapters.search_protocol import PermissionPrincipal, SearchClient, SearchHit
+from app.chat.retrieval_debug import (
+    build_retrieval_debug_for_response,
+    build_retrieval_debug_log_record,
+    log_retrieval_debug,
+)
 from app.chat.retrieval_query import format_query_log_snippet, normalize_retrieval_query_pair
 from app.chat.schemas import ChatGenerateResponse, ChatQueryRequest, ChatSourceItem
 from app.config.settings import Settings
@@ -116,6 +122,30 @@ def run_nas_rag_generate(
         top_k=top_k,
     )
     sources = _sources_from_hits(hits)
+    rb = settings.search_backend
+    rec = build_retrieval_debug_log_record(
+        original_query=original_q,
+        retrieval_query=retrieval_q,
+        normalization_applied=norm_applied,
+        retrieval_backend=rb,
+        top_k=top_k,
+        hits=hits,
+        retrieval_latency_ms=retrieval_ms,
+    )
+    log_retrieval_debug(log, rec)
+    dbg = (
+        build_retrieval_debug_for_response(
+            original_query=original_q,
+            retrieval_query=retrieval_q,
+            normalization_applied=norm_applied,
+            retrieval_backend=rb,
+            top_k=top_k,
+            hits=hits,
+            retrieval_latency_ms=retrieval_ms,
+        )
+        if settings.enable_retrieval_debug
+        else None
+    )
 
     if not hits:
         total_ms = int((time.perf_counter() - t0) * 1000)
@@ -140,6 +170,7 @@ def run_nas_rag_generate(
             retrieval_latency_ms=retrieval_ms,
             llm_latency_ms=None,
             total_latency_ms=total_ms,
+            debug=dbg,
         )
 
     llm_mock = bool(settings.llm_mock_mode or settings.llm_backend == "mock")
@@ -162,7 +193,7 @@ def run_nas_rag_generate(
         err_msg = str(exc).replace("\n", " ")[:500]
         log.warning(
             "nas_rag_generate llm_failed error_type=%s error_message=%r original_query=%r retrieval_query=%r "
-            "normalization_applied=%s retrieval_count=%s used_chunk_ids=%s",
+            "normalization_applied=%s retrieval_count=%s used_chunk_ids=%s retrieval_debug=%s",
             type(exc).__name__,
             err_msg,
             format_query_log_snippet(original_q),
@@ -170,6 +201,7 @@ def run_nas_rag_generate(
             norm_applied,
             len(hits),
             [str(h.chunk_id) for h in hits],
+            json.dumps(rec, ensure_ascii=False),
         )
         raise NasRagLLMError("LLM generation failed") from exc
     t_llm1 = time.perf_counter()
@@ -201,4 +233,5 @@ def run_nas_rag_generate(
         retrieval_latency_ms=retrieval_ms,
         llm_latency_ms=llm_ms,
         total_latency_ms=total_ms,
+        debug=dbg,
     )

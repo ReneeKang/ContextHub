@@ -91,6 +91,8 @@ class Settings(BaseSettings):
         alias="INTERNAL_GENERATE_API_KEY",
         description="Optional Bearer token for internal gateway (omit header if unset).",
     )
+    #: When true, ``/query`` and ``/generate`` responses include a ``debug`` object with retrieval metadata.
+    enable_retrieval_debug: bool = Field(default=False, alias="ENABLE_RETRIEVAL_DEBUG")
 
 
 @lru_cache
