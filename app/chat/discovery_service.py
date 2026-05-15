@@ -1,8 +1,8 @@
 """
-Document discovery: group ``SearchHit`` rows by ``raw_document_id`` (no SearchClient contract change).
+Document discovery: over-fetch chunks, group by ``raw_document_id``, return document ``top_k``.
 
-``top_k`` on the request is the chunk-level retrieval limit for ``SearchClient.search`` today;
-structure allows a future split into ``top_k_chunks`` / ``top_k_documents`` without breaking callers.
+``DiscoverRequest.top_k`` is the **document** candidate limit. Chunk retrieval uses a larger
+``chunk_fetch_size`` so one document cannot monopolize the chunk hit list before grouping.
 """
 
 from __future__ import annotations
@@ -12,7 +12,7 @@ import logging
 import re
 import time
 from collections import defaultdict
-from typing import Any
+from typing import Any, Callable
 from uuid import UUID
 
 from sqlalchemy import select
@@ -33,9 +33,20 @@ log = logging.getLogger("contexthub.chat.discovery")
 
 _PROJECT_SLUG_RE = re.compile(r"/projects/([^/]+)/", re.IGNORECASE)
 
-# Per-document caps (MVP; design doc suggested 3–5 chunks in response)
+# Per-document caps (design: 3–5 matched chunks in response)
 _MAX_REPRESENTATIVE_SECTIONS = 3
-_MAX_MATCHED_CHUNKS_PER_DOC = 4
+_MAX_MATCHED_CHUNKS_PER_DOC = 5
+_CHUNK_FETCH_SIZE_MULTIPLIER = 10
+_CHUNK_FETCH_SIZE_MIN = 50
+# Drop weak documents vs best hit unless they have metadata highlights.
+_RELATIVE_SCORE_MIN_RATIO = 0.1
+
+
+def chunk_fetch_size(document_top_k: int) -> int:
+    """OpenSearch/SQL ``LIMIT`` for chunk hits before document grouping."""
+    return max(document_top_k * _CHUNK_FETCH_SIZE_MULTIPLIER, _CHUNK_FETCH_SIZE_MIN)
+
+
 _HIGHLIGHT_MAX_KEYS = 2
 _HIGHLIGHT_MAX_FRAGMENTS_PER_KEY = 2
 _HIGHLIGHT_MAX_CHARS_PER_FRAGMENT = 160
@@ -110,6 +121,43 @@ def _load_raw_documents(session: Session, ids: list[UUID]) -> dict[UUID, RawDocu
     return {r.raw_document_id: r for r in rows}
 
 
+def _document_has_metadata_highlight(doc_hits: list[SearchHit]) -> bool:
+    """True when any chunk has non-body highlight fragments (filename, path, section, etc.)."""
+    return any(_trim_highlights(h.highlights) for h in doc_hits)
+
+
+def filter_document_candidates(
+    ordered_ids: list[UUID],
+    by_doc: dict[UUID, list[SearchHit]],
+    *,
+    doc_top_score: Callable[[UUID], float],
+    min_relative_ratio: float = _RELATIVE_SCORE_MIN_RATIO,
+) -> tuple[list[UUID], int]:
+    """
+    Drop documents with no metadata highlights and top_score far below the best hit.
+
+    Keep when ``has_highlight`` OR ``top_score >= best_score * min_relative_ratio``.
+    """
+    if not ordered_ids:
+        return [], 0
+
+    best_score = max(doc_top_score(rid) for rid in ordered_ids)
+    if best_score <= 0:
+        return list(ordered_ids), 0
+
+    threshold = best_score * min_relative_ratio
+    kept: list[UUID] = []
+    dropped = 0
+    for rid in ordered_ids:
+        top_score = doc_top_score(rid)
+        has_highlight = _document_has_metadata_highlight(by_doc[rid])
+        if has_highlight or top_score >= threshold:
+            kept.append(rid)
+        else:
+            dropped += 1
+    return kept, dropped
+
+
 def run_discover(
     session: Session,
     settings: Settings,
@@ -117,15 +165,16 @@ def run_discover(
     principal: PermissionPrincipal,
     body: DiscoverRequest,
 ) -> DiscoverResponse:
-    """Chunk retrieval via ``SearchClient.search``, then document-level grouping (no LLM)."""
+    """Over-fetch chunks, group by document, return up to ``top_k`` distinct documents (no LLM)."""
     original_q = body.question.strip()
     retrieval_q, norm_applied = normalize_retrieval_query_pair(body.question)
-    top_k_chunks = body.top_k or 10
+    top_k_documents = body.top_k or 10
+    fetch_chunks = chunk_fetch_size(top_k_documents)
 
     t0 = time.perf_counter()
     hits = search.search(
         query=retrieval_q,
-        top_k=top_k_chunks,
+        top_k=fetch_chunks,
         principal=principal,
         index_name=settings.search_index_name,
     )
@@ -142,7 +191,13 @@ def run_discover(
     def doc_top_score(doc_id: UUID) -> float:
         return max((x.score for x in by_doc[doc_id]), default=0.0)
 
-    ordered_ids = sorted(doc_ids, key=doc_top_score, reverse=True)
+    ordered_all = sorted(doc_ids, key=doc_top_score, reverse=True)
+    ordered_ids, dropped_documents_count = filter_document_candidates(
+        ordered_all,
+        by_doc,
+        doc_top_score=doc_top_score,
+    )
+    ordered_ids = ordered_ids[:top_k_documents]
 
     documents: list[DiscoverDocumentItem] = []
     top_scores_log: list[float] = []
@@ -194,6 +249,11 @@ def run_discover(
         "original_query": format_query_log_snippet(original_q, max_len=2000),
         "retrieval_query": format_query_log_snippet(retrieval_q, max_len=2000),
         "normalization_applied": norm_applied,
+        "top_k_documents": top_k_documents,
+        "chunk_fetch_size": fetch_chunks,
+        "chunk_hits_fetched": len(hits),
+        "documents_before_filter": len(ordered_all),
+        "dropped_documents_count": dropped_documents_count,
         "document_count": len(documents),
         "retrieved_document_ids": [str(i) for i in ordered_ids],
         "top_scores": top_scores_log,

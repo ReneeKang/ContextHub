@@ -381,6 +381,7 @@ class AdminService:
                 delete(DocumentParseResult).where(DocumentParseResult.raw_document_id == raw_document_id)
             )
             doc.parse_status = ParseStatus.PENDING
+            doc.parse_error_message = None
             doc.chunk_status = ChunkStatus.PENDING
             doc.index_status = DocumentPipelineIndexStatus.PENDING
         elif stage == "chunk":

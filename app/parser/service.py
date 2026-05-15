@@ -76,9 +76,10 @@ class ParserService:
             path = Path(doc.stored_path)
             try:
                 file_bytes = path.read_bytes()
-            except OSError:
+            except OSError as exc:
                 log.exception("failed to read file for raw_document_id=%s path=%s", doc.raw_document_id, path)
                 doc.parse_status = ParseStatus.FAILED
+                doc.parse_error_message = str(exc)[:8000]
                 stats.failed += 1
                 continue
 
@@ -92,9 +93,10 @@ class ParserService:
             )
             try:
                 result = self._parser.parse(request)
-            except Exception:
+            except Exception as exc:
                 log.exception("parser raised for raw_document_id=%s", doc.raw_document_id)
                 doc.parse_status = ParseStatus.FAILED
+                doc.parse_error_message = str(exc)[:8000]
                 stats.failed += 1
                 continue
 
@@ -110,6 +112,7 @@ class ParserService:
                 )
             )
             doc.parse_status = ParseStatus.DONE
+            doc.parse_error_message = None
             # chunk_status / index_status unchanged per design (chunk stays PENDING)
             stats.processed += 1
             log.info(

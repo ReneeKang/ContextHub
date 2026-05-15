@@ -57,6 +57,17 @@ def chunk_index_create_body() -> dict[str, Any]:
                         }
                     },
                 },
+                "inbox_path": {
+                    "type": "text",
+                    "analyzer": "nori_analyzer",
+                    "fields": {
+                        "kw": {
+                            "type": "keyword",
+                            "ignore_above": 4096,
+                            "normalizer": "filename_lowercase",
+                        }
+                    },
+                },
                 "file_ext": {"type": "keyword"},
                 "chunk_no": {"type": "integer"},
                 "section_title": {

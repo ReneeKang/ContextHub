@@ -80,6 +80,8 @@ NAS 공식 반입 폴더
 | [poc-scope.md](poc-scope.md) | PoC에서 할 것 / 하지 말아야 할 것 |
 | [todo-roadmap.md](todo-roadmap.md) | 단계별 로드맵 |
 | [backend-status.md](backend-status.md) | 백엔드·LLM·RAG MVP 구현 상태, `/chat/generate` 사용법(요청: `ChatQueryRequest`, 필수 `question`) |
+| [poc-ui-design.md](poc-ui-design.md) | **POC UI 단일 기준 문서** · 레이아웃 · 컴포넌트 · 상태머신 · API 순서 · 시나리오 · 기술스택 |
+| [rag-troubleshooting-and-lessons.md](rag-troubleshooting-and-lessons.md) | **운영형 RAG 구축 트러블슈팅 기록** · 발생 순서대로 21개 이슈 · 원인·해결·교훈·흐름 연결 · 체크리스트 |
 
 ---
 

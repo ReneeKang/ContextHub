@@ -144,6 +144,158 @@ def test_representative_sections_deduped_max_three() -> None:
     assert secs == ["Same", "Other", "Third"]
 
 
+def test_chunk_fetch_size_scales_with_document_top_k() -> None:
+    from app.chat.discovery_service import chunk_fetch_size
+
+    assert chunk_fetch_size(10) == 100
+    assert chunk_fetch_size(3) == 50
+    assert chunk_fetch_size(6) == 60
+
+
+class _TopKSliceSearch(SearchClient):
+    """Simulates backends that return only the top-N chunk hits by score."""
+
+    def __init__(self, hits: list[SearchHit]) -> None:
+        self._sorted = sorted(hits, key=lambda h: h.score, reverse=True)
+        self.last_top_k: int | None = None
+
+    def search(
+        self,
+        *,
+        query: str,
+        top_k: int,
+        principal: PermissionPrincipal,
+        index_name: str,
+    ) -> list[SearchHit]:
+        self.last_top_k = top_k
+        _ = query, principal, index_name
+        return self._sorted[:top_k]
+
+    def index_chunk_document(self, **kwargs: object) -> None:
+        raise AssertionError
+
+    def delete_chunks_for_document(self, **kwargs: object) -> None:
+        raise AssertionError
+
+
+def test_discover_returns_multiple_documents_when_one_doc_dominates_chunk_ranks() -> None:
+    """With top_k=10 documents, chunk fetch must be large enough to surface other docs."""
+    rid_dom = uuid.uuid4()
+    rid_b = uuid.uuid4()
+    rid_c = uuid.uuid4()
+    hits: list[SearchHit] = []
+    for i in range(30):
+        hits.append(
+            _hit(
+                raw_document_id=rid_dom,
+                chunk_no=i + 1,
+                score=100.0 - i * 0.1,
+                section_title=f"dom-{i}",
+            )
+        )
+    hits.append(
+        _hit(
+            raw_document_id=rid_b,
+            chunk_no=1,
+            score=5.0,
+            section_title="doc-b",
+            highlights={"section_title": ["과업대비표"]},
+        )
+    )
+    hits.append(
+        _hit(
+            raw_document_id=rid_c,
+            chunk_no=1,
+            score=4.0,
+            section_title="doc-c",
+            highlights={"heading_path": ["과업대비표"]},
+        )
+    )
+
+    search = _TopKSliceSearch(hits)
+    meta = {
+        rid_dom: _doc_row(rid_dom, "public/v09.pdf"),
+        rid_b: _doc_row(rid_b, "public/ID_A01_과업대비표.xlsx"),
+        rid_c: _doc_row(rid_c, "public/ID_B02_과업대비표.xlsx"),
+    }
+    with patch("app.chat.discovery_service._load_raw_documents", return_value=meta):
+        out = run_discover(
+            MagicMock(),
+            _settings(),
+            search,
+            PermissionPrincipal("u", ()),
+            DiscoverRequest(question="과업대비표", top_k=10),
+        )
+
+    assert search.last_top_k == 100
+    assert out.document_count >= 3
+    returned = {d.raw_document_id for d in out.documents}
+    assert rid_b in returned
+    assert rid_c in returned
+    dom = next(d for d in out.documents if d.raw_document_id == rid_dom)
+    assert dom.matched_chunk_count == 30
+    assert len(dom.matched_chunks) == 5
+
+
+def test_discover_drops_low_score_no_highlight_irrelevant_document() -> None:
+    """과업대비표: strong hits with highlights stay; weak tailing PDF without highlight is dropped."""
+    rid_a01_1 = uuid.uuid4()
+    rid_a01_2 = uuid.uuid4()
+    rid_a01_3 = uuid.uuid4()
+    rid_p05 = uuid.uuid4()
+    hl = {"section_title": ["<em>과업대비표</em>"]}
+    hits = [
+        _hit(raw_document_id=rid_a01_1, chunk_no=1, score=122.0, highlights=hl),
+        _hit(raw_document_id=rid_a01_2, chunk_no=1, score=118.0, highlights=hl),
+        _hit(raw_document_id=rid_a01_3, chunk_no=1, score=117.0, highlights=hl),
+        _hit(
+            raw_document_id=rid_p05,
+            chunk_no=1,
+            score=1.033,
+            section_title="무관",
+            highlights=None,
+        ),
+    ]
+    search = _FixedSearch(hits)
+    meta = {
+        rid_a01_1: _doc_row(rid_a01_1, "public/ID_A01_과업대비표_1.xlsx"),
+        rid_a01_2: _doc_row(rid_a01_2, "public/ID_A01_과업대비표_2.xlsx"),
+        rid_a01_3: _doc_row(rid_a01_3, "public/ID_A01_과업대비표_3.xlsx"),
+        rid_p05: _doc_row(rid_p05, "public/ID_P05_테일러링내역서.pdf"),
+    }
+    with patch("app.chat.discovery_service._load_raw_documents", return_value=meta):
+        out = run_discover(
+            MagicMock(),
+            _settings(),
+            search,
+            PermissionPrincipal("u", ()),
+            DiscoverRequest(question="과업대비표", top_k=10),
+        )
+
+    assert out.document_count == 3
+    returned = {d.raw_document_id for d in out.documents}
+    assert rid_p05 not in returned
+    assert {rid_a01_1, rid_a01_2, rid_a01_3} == returned
+    scores = sorted((d.top_score for d in out.documents), reverse=True)
+    assert scores == [122.0, 118.0, 117.0]
+
+
+def test_discover_caps_document_count_at_top_k() -> None:
+    hits = [_hit(raw_document_id=uuid.uuid4(), chunk_no=1, score=float(10 - i)) for i in range(15)]
+    search = _TopKSliceSearch(hits)
+    meta = {h.raw_document_id: _doc_row(h.raw_document_id, f"/p/{i}.txt") for i, h in enumerate(hits)}
+    with patch("app.chat.discovery_service._load_raw_documents", return_value=meta):
+        out = run_discover(
+            MagicMock(),
+            _settings(),
+            search,
+            PermissionPrincipal("u", ()),
+            DiscoverRequest(question="q", top_k=10),
+        )
+    assert out.document_count == 10
+    assert search.last_top_k == 100
+
+
 def test_matched_chunks_capped_and_sorted_by_score() -> None:
     rid = uuid.uuid4()
     hits = [_hit(raw_document_id=rid, chunk_no=i, score=float(i), section_title=f"S{i}") for i in range(1, 8)]
@@ -152,9 +304,9 @@ def test_matched_chunks_capped_and_sorted_by_score() -> None:
     with patch("app.chat.discovery_service._load_raw_documents", return_value=meta):
         out = run_discover(MagicMock(), _settings(), search, PermissionPrincipal("u", ()), DiscoverRequest(question="q"))
     mc = out.documents[0].matched_chunks
-    assert len(mc) == 4
+    assert len(mc) == 5
     scores = [m.score for m in mc]
-    assert scores == [7.0, 6.0, 5.0, 4.0]
+    assert scores == [7.0, 6.0, 5.0, 4.0, 3.0]
 
 
 def test_project_key_from_inbox_path() -> None:

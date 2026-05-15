@@ -81,6 +81,23 @@ class RetrievalDebugChunkItem(BaseModel):
     chunk_rank: int = Field(ge=1, description="1-based index of this chunk in the retrieval hit list.")
 
 
+class GenerationContextChunkItem(BaseModel):
+    """Truncated chunk body preview for ``/generate`` debug (LLM prompt context only)."""
+
+    chunk_id: UUID
+    raw_document_id: UUID
+    original_filename: str
+    chunk_no: int
+    section_title: str | None = None
+    score: float
+    char_count: int = Field(ge=0, description="Full ``chunk_text`` length before preview truncation.")
+    text_preview: str = Field(description="First ~300 characters of ``chunk_text`` (no full body).")
+    included_in_prompt: bool = Field(
+        default=True,
+        description="True when this chunk was included in the LLM user prompt CONTEXT block.",
+    )
+
+
 class RetrievalDebugInfo(BaseModel):
     """Returned as ``debug`` when ``ENABLE_RETRIEVAL_DEBUG=true`` (dev / ops)."""
 
@@ -96,6 +113,17 @@ class RetrievalDebugInfo(BaseModel):
     retrieval_scores: list[float]
     retrieval_filenames: list[str]
     chunks: list[RetrievalDebugChunkItem]
+    generation_context_chunks: list[GenerationContextChunkItem] | None = Field(
+        default=None,
+        description="``/generate`` only: truncated previews of chunks sent to the LLM (when debug enabled).",
+    )
+
+    @model_serializer(mode="wrap")
+    def _serialize_omit_null_generation_context(self, serializer):
+        data = serializer(self)
+        if data.get("generation_context_chunks") is None:
+            data.pop("generation_context_chunks", None)
+        return data
 
 
 class ChatQueryResponse(BaseModel):
@@ -161,7 +189,7 @@ class ChatGenerateResponse(BaseModel):
 
 
 class DiscoverRequest(BaseModel):
-    """Chunk-level ``top_k`` for ``SearchClient.search`` (future: may split into top_k_chunks / top_k_documents)."""
+    """Maximum distinct documents to return; chunk retrieval over-fetches before grouping."""
 
     question: str
     top_k: int | None = Field(default=10, ge=1, le=50)

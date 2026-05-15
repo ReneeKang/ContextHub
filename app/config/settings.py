@@ -60,6 +60,9 @@ class Settings(BaseSettings):
         description="Fallback parser_name when adapter omits it; per-format engines set their own name.",
     )
     parser_version: str = Field(default="stub-0.0.0", alias="PARSER_VERSION")
+    #: Subprocess argv prefix for HWP/HWPX (e.g. ``node tools/kordoc-cli/parse.mjs``). See ``KORDOC_CLI_COMMAND``.
+    kordoc_cli_command: str | None = Field(default=None, alias="KORDOC_CLI_COMMAND")
+    kordoc_cli_timeout_seconds: float = Field(default=120.0, alias="KORDOC_CLI_TIMEOUT_SECONDS")
 
     #: When ``True``, always use mock LLM (ignores ``LLM_BACKEND`` for HTTP).
     llm_mock_mode: bool = Field(default=True, alias="LLM_MOCK_MODE")

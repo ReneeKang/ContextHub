@@ -16,6 +16,7 @@ dependencies = [
   "pydantic-settings>=2.6.0",
   "pypdf>=5.0.0",
   "python-docx>=1.1.0",
+  "openpyxl>=3.1.0",
   "opensearch-py>=2.6.0,<3",
 ]
 
@@ -33,3 +34,6 @@ pythonpath = ["."]
 [tool.setuptools.packages.find]
 where = ["."]
 include = ["app*"]
+
+[tool.setuptools.package-data]
+app = ["static/poc/**/*"]

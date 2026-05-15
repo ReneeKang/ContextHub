@@ -1,0 +1,9 @@
+{
+  "name": "contexthub-kordoc-cli",
+  "private": true,
+  "description": "Subprocess bridge from ContextHub ParserService to kordoc (HWP/HWPX)",
+  "type": "module",
+  "bin": {
+    "contexthub-kordoc-parse": "./parse.mjs"
+  }
+}

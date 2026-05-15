@@ -54,6 +54,8 @@ class RawDocument(Base):
         SAEnum(ParseStatus, native_enum=False, length=20),
         default=ParseStatus.PENDING,
     )
+    #: Last parser failure message (truncated); cleared on successful parse or parse-stage reprocess.
+    parse_error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
     chunk_status: Mapped[ChunkStatus] = mapped_column(
         SAEnum(ChunkStatus, native_enum=False, length=20),
         default=ChunkStatus.PENDING,

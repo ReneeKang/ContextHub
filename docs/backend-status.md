@@ -4,14 +4,38 @@
 
 ---
 
+## 0. 현재 진행 단계 (2026-05)
+
+| 단계 | 상태 | 비고 |
+|------|------|------|
+| Ingestion / xlsx·kordoc parser 확장 | ✅ (코드) | FAILED 문서는 수동 reprocess 필요 |
+| OpenSearch filename/path boost | ✅ | 매핑 변경 시 재색인 |
+| **Discover retrieval post-processing** | ✅ | chunk over-fetch → document grouping → 상대 점수·highlight 필터 (`discovery_service.py`) |
+| POC discover → select → generate 연결 | ✅ | `app/static/poc/` |
+| **Generate quality validation** | 🔄 **진행 중** | 선택 문서·sources·debug·답변 근거 일치 여부 운영 검증 |
+| Generate multi-document context 균형 | ⏳ 후보 | 선택 N건이어도 chunk `top_k`가 한 문서에 치우칠 수 있음 |
+
+**다음 작업:** POC/Swagger에서 `과업대비표` 시나리오로 문서 1건·3건 선택 후 `/generate` 검증. `.env`에 `ENABLE_RETRIEVAL_DEBUG=true` 권장(로컬).
+
+---
+
 ## 1. Chat API
 
 | 엔드포인트 | 역할 | 구현 위치 |
 |-------------|------|-----------|
 | `POST /api/v1/chat/query` | **Retrieval 전용** 검증: 권한 필터 검색 + 스텁 형태의 `answer` (LLM 미호출) | `app/chat/router.py`, `app/chat/service.py` |
-| `POST /api/v1/chat/discover` | **문서 탐색 MVP**: 동일 `SearchClient.search`로 chunk 검색 후 `raw_document_id` 단위로 묶어 반환 (LLM 미호출, `chunk_text` 미포함) | `app/chat/router.py`, `app/chat/discovery_service.py` |
+| `POST /api/v1/chat/discover` | **문서 탐색 MVP**: chunk over-fetch → `raw_document_id` 그룹핑 → document `top_k` → **Search Post-processing**(상대 점수·highlight 필터). LLM 미호출, `chunk_text` 미포함 | `app/chat/router.py`, `app/chat/discovery_service.py` |
 | `POST /api/v1/chat/generate` | **RAG generation MVP**: 권한 반영 `SearchClient.search` → (선택) `document_ids`로 `raw_document_id` 필터 → 히트가 없으면 **선택 문서 chunk DB fallback**(동일 권한·색인 조건) → 프롬프트·LLM. 응답에 `selected_document_ids`, `filtered_retrieval_count` 포함 | `app/chat/router.py`, `app/agents/nas_rag.py`, `app/chat/selected_document_fallback.py`, `app/chat/schemas.py` (`ChatGenerateRequest`) |
 | `GET /api/v1/chat/history/{session_id}` | 미구현 (501) | `app/chat/router.py` |
+
+### POC UI (Vanilla)
+
+| 경로 | 설명 |
+|------|------|
+| `GET /`, `GET /poc` | 브라우저 POC (**3열 레이아웃**: 사이드바 · 검색/후보/답변 · 선택·출처·debug). `discover` → 문서 선택 → `generate` + `document_ids`. 정적 파일: `app/static/poc/`. |
+| `/static/poc/*` | `index.html`, `css/style.css`, `js/*.js` (ES modules). |
+
+로컬 실행: `uvicorn app.main:app --reload --host 0.0.0.0 --port 8000` 후 `http://127.0.0.1:8000/poc` (또는 `/`). 상세 레이아웃은 `docs/poc-ui-design.md`.
 
 ### `/query`와 `/generate`를 분리한 이유
 
@@ -59,7 +83,7 @@ question (원본, 사용자 입력)
 
 `POST /api/v1/chat/discover`는 검색 직후 `contexthub.chat.discovery` 로거로 `chat_discover {…}` 한 줄을 남긴다. 필드: `original_query`, `retrieval_query`, `normalization_applied`, `document_count`, `retrieved_document_ids`, `top_scores`, `retrieval_backend`, `retrieval_latency_ms`. 역시 **chunk 본문 로그 없음**.
 
-**응답 `debug` (선택):** `ENABLE_RETRIEVAL_DEBUG=true`(기본 `false`)일 때만 응답 JSON에 `debug` 객체를 붙인다(`RetrievalDebugInfo`: 동일 메타 + `chunks` 배열; 역시 본문 없음). 운영에서는 끄고, 로컬·스테이징에서 Swagger로 원인 분석할 때 켠다.
+**응답 `debug` (선택):** `ENABLE_RETRIEVAL_DEBUG=true`(기본 `false`)일 때만 응답 JSON에 `debug` 객체를 붙인다(`RetrievalDebugInfo`: 동일 메타 + `chunks` 배열; 역시 전체 본문 없음). **`POST /generate`만** `debug.generation_context_chunks`에 LLM 프롬프트에 넣은 chunk의 `text_preview`(약 300자)를 추가한다. POC 우측 Retrieval debug 패널에서 확인.
 
 **활용 예:** retrieval 품질·정규화 효과 분석, vector/hybrid 전환 전 BM25 기준선 검증, 운영 장애(0건·권한) 분석, hallucination과의 대조를 위한 **source 추적**, 감사 대응 시 “어떤 질의로 어떤 chunk_id가 매칭됐는지” 입증.
 
@@ -380,17 +404,85 @@ LLM_MODEL=gpt-oss-20b
 
 ---
 
-## 11. 관련 문서
+## 11. POC UI 구현 상태
+
+UI는 백엔드 API 계약을 변경하지 않는다. `/discover` → 문서 선택 → `/generate(document_ids)` 흐름을 시각화하는 역할만 한다.
+
+### 현재 구현 단계: Connected POC UI — API Wiring 완료
+
+| 구성 요소 | 상태 |
+|----------|------|
+| FastAPI StaticFiles + `/poc` 라우트 | ✅ 완료 |
+| 3-panel 레이아웃 (사이드바·중앙·우측) | ✅ 완료 |
+| `POST /api/v1/chat/discover` 연결 | ✅ 완료 |
+| `POST /api/v1/chat/generate` 연결 | ✅ 완료 |
+| discover 응답 → 문서 카드 렌더링 | ✅ 완료 |
+| `raw_document_id` 기준 체크박스 선택 관리 | ✅ 완료 |
+| 선택 `document_ids` → generate 전달 | ✅ 완료 |
+| generate 응답 → 답변·출처·debug 렌더링 | ✅ 완료 |
+| phase 상태 전환 (DISCOVERING → DISCOVERED → GENERATING → ANSWERED) | ✅ 완료 |
+| EMPTY (빈 결과) 처리 | ✅ 완료 |
+| /discover 오류 → 후보 영역 오류 표시 | ✅ 완료 |
+| /generate 오류 → 선택 상태 유지 + 답변 영역 오류 표시 | ✅ 완료 |
+| top_k / test_department_codes → API 요청 반영 | ✅ 완료 |
+| mock 데이터 제거 | ✅ 완료 |
+
+### 파일별 역할
+
+| 파일 | 역할 |
+|------|------|
+| `api.js` | fetch 처리, FastAPI detail 에러 파싱, discover 빈 결과 판별 |
+| `state.js` | phase 관리, selectedDocumentIds Set, canStartDiscover / canStartGenerate 판단 |
+| `main.js` | 버튼/입력 이벤트 처리, API 호출 흐름 제어, phase 전환 |
+| `render.js` | API 응답 기반 DOM 렌더링, progress 단계 표시, 문서 카드·선택 패널·답변·출처·debug 표시 |
+
+### 접속 및 사용
+
+```
+uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
+→ http://127.0.0.1:8000/poc
+```
+
+실제 색인 데이터가 있어야 검색 결과가 반환된다. LLM 연결은 `.env`의 `LLM_BACKEND` 설정에 따른다.
+
+### 현재 검증 필요 항목
+
+| 항목 | 확인 방법 |
+|------|---------|
+| **Generate 품질 (1건·3건 선택)** | `과업대비표` discover → A01 선택 → generate: `selected_document_ids`, `sources`, `answer` 일치 |
+| **Generate context 치우침** | 문서 3건 선택 시 `sources`/`debug.chunks`가 선택 문서 전부에서 오는지 (한 문서 청크만 나오면 `top_k`·fetch 정책 검토) |
+| `/discover` 빈 결과 처리 | 색인 없는 질문으로 EMPTY 상태 진입 확인 |
+| `/generate` 실패 시 선택 상태 유지 | LLM 오류 시 문서 카드 선택 유지 확인 |
+| `test_department_codes` 필터 적용 | 부서 설정 후 DEPT 문서 포함 여부 확인 |
+| `top_k` 적용 여부 | discover `top_k`=문서 수, generate `top_k`=청크 수 (UI Advanced) |
+| `sources` / `debug` 표시 여부 | `ENABLE_RETRIEVAL_DEBUG=true` 환경에서 debug 패널·`chunk_rank`/`document_rank`/`matched_fields`/`highlight_terms` |
+| `document_ids` 매핑 정확성 | 브라우저 `console.debug` `[POC] /api/v1/chat/generate payload` vs 응답 `selected_document_ids` |
+
+### 다음 개선 후보
+
+| 항목 | 설명 |
+|------|------|
+| Retrieval Debug UI 가독성 개선 | matched_fields, highlight_terms, document_rank 테이블 정리 |
+| 문서 카드 점수 시각화 개선 | score 바 색상 + top_score 수치 동시 표시 |
+| 선택 문서 미리보기 강화 | 우측 패널에 representative_sections 표시 |
+| Progress 단계별 소요 시간 표시 | 각 단계 완료 시각 표시 |
+| POC 테스트 시나리오 문서화 | 시나리오 A/B/C를 재현 가능한 절차로 정리 |
+
+---
+
+## 12. 관련 문서
 
 - `docs/llm-gateway.md` — LLMClient 교체 전략, 운영 로그 필드 정의
 - `docs/agent-architecture.md` — 장기 Agent 레이어 (현재는 단일 `nas_rag` 오케스트레이션)
 - `docs/logging-audit.md` — Gateway 운영 로그 vs Agent 감사 로그 분리 설계
 - `docs/retrieval-roadmap.md` — keyword → hybrid → vector retrieval 확장 방향
 - `docs/prompt-strategy.md` — PromptBuilder 설계 및 금지 패턴
+- `docs/poc-ui-design.md` — POC UI 설계 기준 문서 (API Wiring 완료, 검증 항목 및 개선 후보 포함)
+- `docs/rag-troubleshooting-and-lessons.md` — 운영형 RAG 구축 트러블슈팅 기록 (발생 순서 기반 21개 이슈, ingestion→retrieval→generation 레이어별 원인·해결·교훈, 체크리스트)
 
 ---
 
-## 12. 자동 검증 (pytest)
+## 13. 자동 검증 (pytest)
 
 ```bash
 pip install -e ".[dev]"

@@ -21,9 +21,11 @@ kordoc은 ContextHub의 **문서 파싱 구현체**다.
 
 ## kordoc 호출 위치
 
-> **kordoc은 반드시 `document-parse-worker` 내부에서만 호출한다.**
+> **kordoc은 반드시 parse worker (`app/parser/service.py` → `RoutingParser` → `KordocCliParser`) 내부에서만 호출한다.**
 
 다른 컴포넌트(chat-api, admin-api, chunk-worker, index-worker 등)에서 직접 호출하지 않는다.
+
+ContextHub는 kordoc을 **직접 import하지 않고**, Node subprocess CLI(`tools/kordoc-cli/parse.mjs`)로 호출한 뒤 stdout JSON을 `ParseResult`로 감쌉니다. 상세: [parser-architecture.md](parser-architecture.md).
 
 ```
 NAS Scan Worker     → kordoc 호출 금지
@@ -173,18 +175,17 @@ document-parse-worker
 
 ---
 
-## 지원 파일 형식 (PoC 범위)
+## 지원 파일 형식 (라우팅 기준)
 
-| 형식 | 지원 여부 |
-|------|----------|
-| PDF | ✅ |
-| DOCX | ✅ |
-| HWP | ✅ |
-| HWPX | ✅ |
-| TXT | ✅ |
-| XLSX | ❌ (PoC 이후) |
-| PPTX | ❌ (PoC 이후) |
-| 이미지 OCR | ❌ (PoC 이후) |
+| 형식 | 구현 | 비고 |
+|------|------|------|
+| PDF | pypdf (`PdfPypdfParser`) | Python native |
+| DOCX | python-docx | Python native |
+| TXT / MD | UTF-8 stub | Python native |
+| XLSX | openpyxl | Python native (kordoc 아님) |
+| HWP / HWPX | kordoc CLI | `KORDOC_ENGINE_CMD` 설정 필요 |
+| PPTX | 추후 | 명시적 오류 |
+| 이미지 OCR | 추후 | — |
 
 ---
 
@@ -211,12 +212,12 @@ kordoc을 다른 파서로 교체할 때는 `document-parse-worker`만 수정한
 ## 파싱 실패 처리
 
 ```
-kordoc 호출 실패 또는 예외 발생 시:
-  1. parse_status = 'FAILED' 설정
-  2. 오류 메시지를 별도 로그 또는 오류 컬럼에 기록
-  3. 운영자가 admin-api에서 실패 목록 조회
-  4. 운영자가 재처리 버튼으로 parse_status = 'PENDING' 리셋
-  5. 다음 워커 주기에 재처리
+파서 예외 또는 kordoc CLI 실패 시:
+  1. parse_status = 'FAILED'
+  2. parse_error_message = 원인 (truncated, raw_document 컬럼)
+  3. Admin 실패 목록 또는 SQL로 확인
+  4. POST .../reprocess {"stage":"parse"} → PENDING, parse_error_message 클리어
+  5. python -m app.workers 로 재처리
 ```
 
 ---

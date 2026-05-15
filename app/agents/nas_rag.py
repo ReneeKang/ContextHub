@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session
 
 from app.adapters.search_protocol import PermissionPrincipal, SearchClient, SearchHit
 from app.chat.retrieval_debug import (
+    build_generation_context_chunks,
     build_retrieval_debug_for_response,
     build_retrieval_debug_log_record,
     log_retrieval_debug,
@@ -206,8 +207,9 @@ def run_nas_rag_generate(
             extra["selected_document_context_chunk_limit"] = fallback_context_limit
         rec = {**rec, **extra}
     log_retrieval_debug(log, rec)
-    dbg = (
-        build_retrieval_debug_for_response(
+    dbg = None
+    if settings.enable_retrieval_debug:
+        dbg = build_retrieval_debug_for_response(
             original_query=original_q,
             retrieval_query=retrieval_q,
             normalization_applied=norm_applied,
@@ -215,10 +217,8 @@ def run_nas_rag_generate(
             top_k=top_k,
             hits=hits,
             retrieval_latency_ms=retrieval_ms,
+            generation_context_chunks=build_generation_context_chunks(hits) if hits else [],
         )
-        if settings.enable_retrieval_debug
-        else None
-    )
 
     if not hits:
         total_ms = int((time.perf_counter() - t0) * 1000)

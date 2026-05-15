@@ -186,8 +186,12 @@ python -m app.workers
 | `.txt` / `.md` | 지원 | `stub-text` | UTF-8 디코드, 줄 단위 블록 |
 | `.pdf` | 지원 | `pypdf` | 텍스트 추출만, **OCR 없음** |
 | `.docx` | 지원 | `python-docx` | 문단 + 스타일 기반 제목(`Heading n`, `Title`) → 마크다운 헤딩 |
-| `.hwp` / `.hwpx` | 예정 | placeholder | 파싱 시도 시 **명시적 오류**(향후 kordoc 등 별도 연동) |
+| `.xlsx` | 지원 | `openpyxl` | 시트별 마크다운 테이블 |
+| `.hwp` / `.hwpx` | CLI 연동 | `kordoc` | `KordocCliParser` → `tools/kordoc-cli/parse.mjs`; `KORDOC_ENGINE_CMD` 설정 필요 |
+| `.pptx` | 미지원 | — | 명시적 오류(추후) |
 | 스캔 PDF·표·이미지 본문 | 미지원 | — | 빈 페이지 섹션 가능; OCR/레이아웃 복원은 범위 밖 |
+
+상세: **`docs/parser-architecture.md`**
 
 `document_parse_result.parser_name`에는 실제 엔진 이름(`stub-text`, `pypdf`, `python-docx` 등)이 저장되고, 어댑터가 비우면 `PARSER_NAME` 기본값(`routing`)이 쓰입니다.
 
@@ -283,7 +287,7 @@ Swagger에서 **admin** 태그 아래 위 엔드포인트를 펼치고 **Try it 
 
 ## 외부 연동
 
-- **파서**: `app.adapters.parsers.RoutingParser` + `ParserClient` 구현체(`pypdf`, `python-docx`, `stub-text` 등). **kordoc 실연동은 아직 없음**; 과거 import 경로 `KordocStubParser`는 `stub-text`와 동일(`app/adapters/kordoc_stub.py`).
+- **파서**: `RoutingParser` + `ParserClient` (`pypdf`, `python-docx`, `openpyxl`, `kordoc` CLI 등). HWP/HWPX는 Node CLI 브리지; 실제 kordoc 엔진은 `KORDOC_ENGINE_CMD`로 연결.
 - **OpenSearch**: `SEARCH_BACKEND=opensearch` → `app.adapters.opensearch_client.OpenSearchHttpClient`; 인덱스는 `python -m app.db.opensearch_bootstrap`. **LLM** 은 `app.chat.service` 등 TODO 참고.
 
 ## DB 마이그레이션

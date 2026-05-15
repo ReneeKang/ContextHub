@@ -14,7 +14,7 @@ import re
 from typing import Any
 from uuid import UUID
 
-from sqlalchemy import and_, false, or_, select
+from sqlalchemy import and_, case, false, or_, select
 from sqlalchemy.orm import Session
 
 from app.adapters.search_protocol import PermissionPrincipal, SearchClient, SearchHit
@@ -85,6 +85,7 @@ class DbChunkSearchClient(SearchClient):
             return []
 
         text_predicates = []
+        meta_predicates = []
         for t in terms:
             pat = f"%{_escape_ilike_pattern(t)}%"
             text_predicates.append(
@@ -94,7 +95,14 @@ class DbChunkSearchClient(SearchClient):
                     DocumentChunk.heading_path.ilike(pat, escape="\\"),
                 )
             )
+            meta_predicates.append(
+                or_(
+                    RawDocument.original_filename.ilike(pat, escape="\\"),
+                    RawDocument.inbox_path.ilike(pat, escape="\\"),
+                )
+            )
         text_clause = and_(*text_predicates) if text_predicates else false()
+        meta_clause = and_(*meta_predicates) if meta_predicates else false()
 
         stmt = (
             select(DocumentChunk, RawDocument.original_filename)
@@ -104,9 +112,12 @@ class DbChunkSearchClient(SearchClient):
                 RawDocument.excluded.is_(False),
                 RawDocument.ingest_status == IngestStatus.RECEIVED,
                 _permission_filter(principal),
-                text_clause,
+                or_(text_clause, meta_clause),
             )
-            .order_by(DocumentChunk.created_at.asc())
+            .order_by(
+                case((meta_clause, 0), else_=1),
+                DocumentChunk.created_at.asc(),
+            )
             .limit(top_k)
         )
 

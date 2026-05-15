@@ -19,7 +19,7 @@ from app.llm.protocol import LLMCompletionResult, LLMMessage
 from app.main import app
 
 
-def _hit() -> SearchHit:
+def _hit(*, chunk_text: str = "SECRET_BODY") -> SearchHit:
     cid = uuid.UUID("aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee")
     rid = uuid.UUID("11111111-2222-3333-4444-555555555555")
     return SearchHit(
@@ -27,9 +27,9 @@ def _hit() -> SearchHit:
         raw_document_id=rid,
         original_filename="doc.txt",
         chunk_no=1,
-        section_title=None,
+        section_title="Sec A",
         page_no=None,
-        chunk_text="SECRET_BODY",
+        chunk_text=chunk_text,
         access_scope="PUBLIC",
         score=1.25,
         highlights=None,
@@ -125,6 +125,7 @@ def test_query_debug_enabled_includes_debug_and_log_has_retrieval_json(
     assert dbg["chunks"][0]["document_rank"] == 1
     assert dbg["chunks"][0]["matched_fields"] == []
     assert dbg["chunks"][0]["highlight_terms"] == []
+    assert "generation_context_chunks" not in dbg
 
     rd = [r.getMessage() for r in caplog.records if r.getMessage().startswith("retrieval_debug ")]
     assert rd
@@ -172,3 +173,115 @@ def test_generate_debug_enabled(monkeypatch: pytest.MonkeyPatch) -> None:
     data = resp.json()
     assert data["debug"]["retrieval_query"] == "q1"
     assert data["debug"]["retrieval_count"] == 1
+    ctx = data["debug"]["generation_context_chunks"]
+    assert len(ctx) == 1
+    assert ctx[0]["included_in_prompt"] is True
+    assert ctx[0]["text_preview"] == "SECRET_BODY"
+    assert "chunk_text" not in ctx[0]
+
+
+class _SearchLongBody(SearchClient):
+    def __init__(self, body: str) -> None:
+        self._body = body
+
+    def search(
+        self,
+        *,
+        query: str,
+        top_k: int,
+        principal: PermissionPrincipal,
+        index_name: str,
+    ) -> list[SearchHit]:
+        _ = query, top_k, principal, index_name
+        return [_hit(chunk_text=self._body)]
+
+    def index_chunk_document(self, **kwargs: object) -> None:
+        raise AssertionError
+
+    def delete_chunks_for_document(self, **kwargs: object) -> None:
+        raise AssertionError
+
+
+@pytest.mark.usefixtures("_clear_overrides")
+def test_generate_debug_includes_generation_context_chunks(monkeypatch: pytest.MonkeyPatch) -> None:
+    long_body = "X" * 400
+    search = _SearchLongBody(long_body)
+
+    def _settings() -> Settings:
+        return Settings(
+            llm_mock_mode=True,
+            search_backend="db",
+            enable_retrieval_debug=True,
+            database_url="postgresql+psycopg://x@127.0.0.1:5433/x",
+        )
+
+    class _LLM:
+        def complete(
+            self,
+            *,
+            messages: list[LLMMessage],
+            model: str,
+            max_tokens: int = 1024,
+            temperature: float = 0.2,
+        ) -> LLMCompletionResult:
+            return LLMCompletionResult(text="ok", model="mock")
+
+    monkeypatch.setattr(nas_rag_mod, "get_llm_client", lambda _s: _LLM())
+
+    app.dependency_overrides[chat_deps.get_db] = _fake_db
+    app.dependency_overrides[chat_deps.get_search_client] = lambda: search
+    app.dependency_overrides[chat_deps.get_settings_dep] = _settings
+
+    client = TestClient(app)
+    resp = client.post("/api/v1/chat/generate", json={"question": "q1", "top_k": 5})
+    assert resp.status_code == 200
+    data = resp.json()
+    dbg = data["debug"]
+    assert "generation_context_chunks" in dbg
+    ctx = dbg["generation_context_chunks"]
+    assert len(ctx) == 1
+    row = ctx[0]
+    assert row["included_in_prompt"] is True
+    assert row["char_count"] == 400
+    assert len(row["text_preview"]) <= 301
+    assert row["text_preview"].endswith("…")
+    assert row["text_preview"].startswith("X" * 300)
+    assert "chunk_text" not in row
+    blob = json.dumps(data, ensure_ascii=False)
+    assert long_body not in blob
+    assert "SECRET" not in blob
+
+
+@pytest.mark.usefixtures("_clear_overrides")
+def test_generate_debug_disabled_omits_generation_context_chunks(monkeypatch: pytest.MonkeyPatch) -> None:
+    search = _SearchOneHit()
+
+    def _settings() -> Settings:
+        return Settings(
+            llm_mock_mode=True,
+            search_backend="db",
+            enable_retrieval_debug=False,
+            database_url="postgresql+psycopg://x@127.0.0.1:5433/x",
+        )
+
+    class _LLM:
+        def complete(
+            self,
+            *,
+            messages: list[LLMMessage],
+            model: str,
+            max_tokens: int = 1024,
+            temperature: float = 0.2,
+        ) -> LLMCompletionResult:
+            return LLMCompletionResult(text="ok", model="mock")
+
+    monkeypatch.setattr(nas_rag_mod, "get_llm_client", lambda _s: _LLM())
+
+    app.dependency_overrides[chat_deps.get_db] = _fake_db
+    app.dependency_overrides[chat_deps.get_search_client] = lambda: search
+    app.dependency_overrides[chat_deps.get_settings_dep] = _settings
+
+    client = TestClient(app)
+    resp = client.post("/api/v1/chat/generate", json={"question": "q1", "top_k": 5})
+    assert resp.status_code == 200
+    assert "debug" not in resp.json()

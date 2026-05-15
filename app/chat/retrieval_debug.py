@@ -16,9 +16,14 @@ from typing import Any
 from uuid import UUID
 
 from app.adapters.search_protocol import SearchHit
-from app.chat.schemas import RetrievalDebugChunkItem, RetrievalDebugInfo
+from app.chat.schemas import (
+    GenerationContextChunkItem,
+    RetrievalDebugChunkItem,
+    RetrievalDebugInfo,
+)
 
 _MAX_QUERY_LOG_LEN = 2000
+GENERATION_CONTEXT_PREVIEW_MAX_CHARS = 300
 
 # OpenSearch payload uses ``<em>`` / ``</em>`` (see ``opensearch_payload.build_search_body``).
 _EM_RE = re.compile(r"<em>(.*?)</em>", re.IGNORECASE | re.DOTALL)
@@ -162,6 +167,41 @@ def build_retrieval_debug_log_record(
     }
 
 
+def chunk_text_preview(
+    text: str | None,
+    *,
+    max_chars: int = GENERATION_CONTEXT_PREVIEW_MAX_CHARS,
+) -> str:
+    """Truncate chunk body for debug responses (never return full ``chunk_text``)."""
+    if not text:
+        return ""
+    t = text.strip()
+    if len(t) <= max_chars:
+        return t
+    return t[:max_chars] + "…"
+
+
+def build_generation_context_chunks(hits: list[SearchHit]) -> list[GenerationContextChunkItem]:
+    """One preview row per hit included in the LLM user prompt CONTEXT block."""
+    out: list[GenerationContextChunkItem] = []
+    for h in hits:
+        body = h.chunk_text or ""
+        out.append(
+            GenerationContextChunkItem(
+                chunk_id=h.chunk_id,
+                raw_document_id=h.raw_document_id,
+                original_filename=h.original_filename,
+                chunk_no=h.chunk_no,
+                section_title=h.section_title,
+                score=float(h.score),
+                char_count=len(body),
+                text_preview=chunk_text_preview(body),
+                included_in_prompt=True,
+            )
+        )
+    return out
+
+
 def log_retrieval_debug(logger: logging.Logger, record: dict[str, Any]) -> None:
     """Single INFO line with JSON object (grep-friendly)."""
     logger.info("retrieval_debug %s", json.dumps(record, ensure_ascii=False))
@@ -176,11 +216,13 @@ def build_retrieval_debug_for_response(
     top_k: int,
     hits: list[SearchHit],
     retrieval_latency_ms: int,
+    generation_context_chunks: list[GenerationContextChunkItem] | None = None,
 ) -> RetrievalDebugInfo:
     """
     Build the ``debug`` object for HTTP responses (when ``ENABLE_RETRIEVAL_DEBUG`` is on).
 
     Uses the same trace fields as logs plus a ``chunks`` list (metadata only, no ``chunk_text``).
+    ``generation_context_chunks`` is set on ``/generate`` only (truncated prompt previews).
     """
     ranked = rank_hits_for_retrieval_debug(hits)
     chunks = [
@@ -214,4 +256,5 @@ def build_retrieval_debug_for_response(
         retrieval_scores=[float(h.score) for h in hits],
         retrieval_filenames=[h.original_filename for h in hits],
         chunks=chunks,
+        generation_context_chunks=generation_context_chunks,
     )
