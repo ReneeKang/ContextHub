@@ -20,6 +20,7 @@ from app.db.enums import (
 from app.db.models.raw_document import RawDocument
 from app.db.models.raw_document_scan_state import RawDocumentScanState
 from app.scanner.permissions import extract_permission_meta
+from app.unicode_normalize import normalize_nfc
 
 
 log = logging.getLogger("contexthub.scanner")
@@ -110,7 +111,7 @@ class ScannerService:
                 continue
 
             try:
-                rel = path.relative_to(inbox).as_posix()
+                rel = normalize_nfc(path.relative_to(inbox).as_posix())
                 scope, owner_id, dept = extract_permission_meta(nas_inbox_root=nas_root, stored_path=stored_path)
             except ValueError as exc:
                 log.warning("permission extract failed for %s: %s", stored_path, exc)
@@ -152,7 +153,7 @@ class ScannerService:
             row.stable = True
 
             digest = _sha256_file(path)
-            original_filename = path.name
+            original_filename = normalize_nfc(path.name)
             ext = path.suffix.lower().lstrip(".") or "txt"
 
             canonical = self._session.scalar(

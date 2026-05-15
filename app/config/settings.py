@@ -1,7 +1,7 @@
 from functools import lru_cache
 from typing import Literal
 
-from pydantic import Field, model_validator
+from pydantic import AliasChoices, Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 SearchBackendLiteral = Literal["db", "opensearch_stub", "opensearch"]
@@ -119,6 +119,15 @@ class Settings(BaseSettings):
     rag_llm_max_tokens: int = Field(default=1000, ge=64, le=32000, alias="RAG_LLM_MAX_TOKENS")
     #: Max chunks loaded from DB when selected-document fallback runs (capped with request ``top_k``).
     selected_document_context_chunks: int = Field(default=5, ge=1, le=50, alias="SELECTED_DOCUMENT_CONTEXT_CHUNKS")
+
+    #: Chunk rows processed per indexer worker ``run_once`` batch (SQL ``LIMIT`` / bulk size).
+    #: Default 1000 speeds dev; lower in prod if OpenSearch heap/timeout limits apply.
+    indexer_batch_size: int = Field(
+        default=1000,
+        ge=1,
+        le=20000,
+        validation_alias=AliasChoices("INDEXER_BATCH_SIZE", "WORKER_INDEX_BATCH_SIZE"),
+    )
 
 
 @lru_cache

@@ -280,6 +280,7 @@ Swagger에서 **admin** 태그 아래 위 엔드포인트를 펼치고 **Try it 
 | `SCAN_INTERVAL_SECONDS` | (향후) 스캔/워커 주기 참고용 초 단위 |
 | `SEARCH_INDEX_NAME` | OpenSearch 인덱스 논리 이름 (`contexthub_chunks`) |
 | `SEARCH_BACKEND` | `db`(기본) \| `opensearch_stub`(무HTTP) \| `opensearch`(HTTP; 인덱스 부트스트랩 필요) |
+| `INDEXER_BATCH_SIZE` | 인덱서 한 사이클당 최대 청크 수(기본 **1000**, 로컬 빠른 색인). 동일 의미: **`WORKER_INDEX_BATCH_SIZE`** |
 | `OPENSEARCH_BASE_URL` | 예: `http://127.0.0.1:9201` (Compose 기본 호스트 포트; `SEARCH_BACKEND=opensearch` 일 때 필수) |
 | `OPENSEARCH_SEARCH_HIGHLIGHT` | `true`(기본): 검색 바디에 `highlight` 포함 |
 | `OPENSEARCH_SEARCH_EXPLAIN` | `false`(기본): `true` 이면 첫 히트 BM25 explain 을 DEBUG 로그에 일부 출력 |

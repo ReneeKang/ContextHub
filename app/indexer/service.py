@@ -15,11 +15,19 @@ from app.db.enums import ChunkIndexStatus, DocumentIndexRecordStatus, DocumentPi
 from app.db.models.document_chunk import DocumentChunk
 from app.db.models.document_index_status import DocumentIndexStatus
 from app.db.models.raw_document import RawDocument
+from app.unicode_normalize import normalize_nfc, normalize_nfc_optional
 
 
 log = logging.getLogger("contexthub.indexer")
 
-INDEXER_BATCH_LIMIT = 100
+
+def _indexer_finish_backend_hint(settings: Settings) -> str:
+    """Human-readable search backend line for batch-finish logs (avoid implying stub when opensearch)."""
+    if settings.search_backend == "db":
+        return "search_backend=db (index_chunk_document is no-op; PostgreSQL chunk rows are source of truth)"
+    if settings.search_backend == "opensearch_stub":
+        return "search_backend=opensearch_stub (validate/log only; no HTTP to cluster)"
+    return "search_backend=opensearch (HTTP index to OpenSearch cluster)"
 
 
 @dataclass(slots=True)
@@ -43,12 +51,12 @@ def _chunk_source_document(chunk: DocumentChunk, raw: RawDocument) -> dict[str, 
     return {
         "chunk_id": str(chunk.chunk_id),
         "raw_document_id": str(chunk.raw_document_id),
-        "original_filename": raw.original_filename,
-        "inbox_path": (raw.inbox_path or "").replace("\\", "/"),
+        "original_filename": normalize_nfc(raw.original_filename),
+        "inbox_path": normalize_nfc((raw.inbox_path or "").replace("\\", "/")),
         "file_ext": raw.file_ext,
         "chunk_no": chunk.chunk_no,
-        "section_title": chunk.section_title,
-        "heading_path": chunk.heading_path,
+        "section_title": normalize_nfc_optional(chunk.section_title),
+        "heading_path": normalize_nfc_optional(chunk.heading_path),
         "page_no": chunk.page_no,
         "chunk_text": chunk.chunk_text,
         "chunk_char_count": char_n,
@@ -166,6 +174,7 @@ class IndexerService:
 
     def run_once(self) -> IndexerRunStats:
         index_name = self._settings.search_index_name
+        batch_limit = self._settings.indexer_batch_size
 
         pending_q = (
             select(func.count())
@@ -178,7 +187,7 @@ class IndexerService:
             )
         )
         pending = int(self._session.scalar(pending_q) or 0)
-        log.info("pending index chunks=%s", pending)
+        log.info("pending index chunks=%s batch_limit=%s", pending, batch_limit)
 
         stats = IndexerRunStats(pending_chunks=pending, processed=0, failed=0)
         if pending == 0:
@@ -196,7 +205,7 @@ class IndexerService:
                 RawDocument.ingest_status == IngestStatus.RECEIVED,
             )
             .order_by(DocumentChunk.created_at.asc())
-            .limit(INDEXER_BATCH_LIMIT)
+            .limit(batch_limit)
         )
         rows = list(self._session.execute(stmt).all())
 
@@ -259,8 +268,10 @@ class IndexerService:
             _sync_raw_document_aggregate_index_status(self._session, rid)
 
         log.info(
-            "indexer batch finished processed=%s failed=%s (stub SearchClient; no real OpenSearch)",
+            "indexer batch finished batch_limit=%s processed=%s failed=%s %s",
+            batch_limit,
             stats.processed,
             stats.failed,
+            _indexer_finish_backend_hint(self._settings),
         )
         return stats

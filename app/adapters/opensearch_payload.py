@@ -9,6 +9,8 @@ from __future__ import annotations
 import re
 from typing import Any, TypedDict
 
+from app.unicode_normalize import normalize_nfc
+
 # Fields expected on every indexed chunk document (`_source` / bulk index body).
 # Aligns with `docs/search-index.md` and `IndexerService._chunk_source_document`.
 REQUIRED_CHUNK_INDEX_FIELDS: frozenset[str] = frozenset(
@@ -225,7 +227,7 @@ def build_keyword_search_body(
     or a strong filename/path wildcard/phrase hit.
     """
     perm = build_permission_filter_clause(principal_user_id, department_codes)
-    q = (query or "").strip()
+    q = normalize_nfc((query or "").strip())
 
     if not q:
         root_bool: dict[str, Any] = {

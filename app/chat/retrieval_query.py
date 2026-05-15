@@ -11,6 +11,8 @@ from __future__ import annotations
 import re
 from typing import Final
 
+from app.unicode_normalize import normalize_nfc
+
 
 def _strip_embedded_question_phrases(text: str) -> str:
     """
@@ -87,7 +89,8 @@ def normalize_retrieval_query_pair(question: str) -> tuple[str, bool]:
     if not original:
         return original, False
 
-    q = _strip_embedded_question_phrases(original)
+    nfc_base = normalize_nfc(original)
+    q = _strip_embedded_question_phrases(nfc_base)
     changed = True
     while changed:
         changed = False
@@ -102,7 +105,7 @@ def normalize_retrieval_query_pair(question: str) -> tuple[str, bool]:
     filtered = [t for t in parts if t not in _TOKEN_STOPWORDS]
     out = " ".join(filtered).strip()
 
-    final = out if out else original
+    final = out if out else nfc_base
     applied = final != original
     return final, applied
 

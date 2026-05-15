@@ -192,9 +192,15 @@ sanitize_internal_generate_answer(raw_answer)
 
 ```python
 normalize_retrieval_query(question: str) -> str
-normalize_retrieval_query_pair(question: str) -> tuple[str, str]
-#   returns (retrieval_query, original_query)
+normalize_retrieval_query_pair(question: str) -> tuple[str, bool]  # (retrieval_query, normalization_applied)
 ```
+
+**Unicode NFC (한글 파일명·검색 호환):**
+- macOS(APFS/HFS+)는 파일명을 종종 **NFD**(자모 분리)로 노출하고, Windows 등은 **NFC**인 경우가 많다. 같은 논리 문자열이라도 코드 유닛이 달라 PostgreSQL `ILIKE`/keyword 매칭이 어긋날 수 있다.
+- **대응:** `app/unicode_normalize.py`의 `normalize_nfc` — 스캔 시 `raw_document.original_filename`·`inbox_path` 저장 전 NFC 적용(`app/scanner/service.py`). 검색어는 `normalize_retrieval_query_pair` 단계에서 NFC 적용(`app/chat/retrieval_query.py`). OpenSearch는 색인 페이로드에서 `original_filename`·`inbox_path`·`section_title`·`heading_path`를 NFC로 올리고(`app/indexer/service.py`), `build_keyword_search_body`에서 쿼리 문자열도 NFC(`app/adapters/opensearch_payload.py`).
+- **기존 데이터:** 개발 환경에서는 재스캔·재색인으로 메타/인덱스를 맞춘다.
+- **테스트:** `tests/test_unicode_nfc_retrieval.py` (예: NFD `"과업대비표"` 파일명 ↔ NFC 검색어).
+- **API 계약:** 요청/응답 스키마 변경 없음. LLM 프롬프트의 `question`은 사용자 원문 그대로(코드포인트 보존).
 
 **현재 적용 규칙:**
 - 접미 불용어 제거: `설명`, `알려줘`, `해줘`, `말해줘` 등
@@ -249,24 +255,10 @@ normalize_retrieval_query_pair(question: str) -> tuple[str, str]
 - 한글 자연어 질의: 규칙 기반 정규화 범위 내에서만 안정적
 - 한글 복합어·조사 변형: OpenSearch 경로(nori)에서는 낫고, DB 경로에서는 취약
 
-### scanner / parser / indexer 불변 원칙
+### scanner / indexer와 retrieval 개선 범위
 
-retrieval 품질 개선을 위해 **scanner, parser, chunker, indexer를 수정하지 않는다.**
-
-```
-이미 완료된 파이프라인:
-  scanner → parser → chunker → indexer → OpenSearch
-
-개선 대상:
-  retrieval_query.py (검색 전 쿼리 처리)
-  search_client (검색 방식)
-  agents/nas_rag.py (프롬프트 조립)
-```
-
-이 원칙의 이유:
-- scanner/parser/indexer를 건드리면 기존 색인된 데이터 전체를 재처리해야 할 수 있다
-- retrieval과 generation은 인덱스 데이터에 독립적으로 개선 가능하다
-- 역할 분리 원칙: 색인 파이프라인이 안정화된 이후 retrieval 전략을 별도로 실험한다
+- **검색 전용 실험**(불용어·하이브리드 등)은 기본적으로 `retrieval_query.py`·`SearchClient`·에이전트 쪽에서 조정하는 것을 우선한다(색인 파이프라인 재처리 부담 최소화).
+- **NFC 정규화**처럼 OS 간 파일명 표현 차이를 없애는 변경은 **메타 저장·색인 페이로드**에 한정해 `scanner`·`indexer`에 반영한다(본 요청). 그 외 파서·청커·색인 로직 대규모 변경은 별도 계획에서 수행한다.
 
 ---
 
@@ -492,6 +484,7 @@ pytest -q
 | 테스트 파일 | 검증 내용 |
 |------------|----------|
 | `tests/test_nas_rag_generation.py` | OpenAI base URL 정규화, 질의 로그 스니펫 길이, `get_llm_client` 타임아웃 주입, 검색 0건 시 LLM 미호출, 히트 시 소스 미러링·로그에 `chunk_text` 미포함, LLM 실패 시 `error_type`/`error_message` 로그 |
+| `tests/test_unicode_nfc_retrieval.py` | Unicode NFC: NFD→NFC, 스캐너·색인 페이로드·OpenSearch body·검색 정규화 정합 |
 | `tests/test_retrieval_query_normalize.py` | `normalize_retrieval_query`/`normalize_retrieval_query_pair` 동작 검증, LLM 프롬프트에 원문 `question` 유지, `SearchClient.search`에 정규화 문자열 전달 확인 |
 | `tests/test_swagger_equivalent_retrieval.py` | `httpx` 기반 `TestClient`로 `/chat/query`·`/chat/generate` 동일 JSON 호출; 질의 변형 4종이 동일 `search(query=…)`·동일 소스를 내는지, 로그 필드·LLM user 블록의 원문 `question` 유지 검증 |
 | `tests/test_chat_routes_smoke.py` | OpenAPI에 `/api/v1/chat/query`·`/api/v1/chat/generate` 등록 여부 |
