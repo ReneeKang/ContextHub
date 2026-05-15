@@ -43,6 +43,7 @@ class _RecordingLLM:
     def __init__(self) -> None:
         self.calls = 0
         self.last_messages: list[LLMMessage] | None = None
+        self.last_max_tokens: int | None = None
 
     def complete(
         self,
@@ -52,9 +53,10 @@ class _RecordingLLM:
         max_tokens: int = 1024,
         temperature: float = 0.2,
     ) -> LLMCompletionResult:
-        _ = model, max_tokens, temperature
+        _ = model, temperature
         self.calls += 1
         self.last_messages = messages
+        self.last_max_tokens = max_tokens
         return LLMCompletionResult(text="synthetic-answer", model="mock")
 
 
@@ -373,3 +375,82 @@ def test_fallback_loader_receives_principal_for_permission_enforcement(monkeypat
     assert captured[0][0].user_id == "u-1"
     assert captured[0][0].department_codes == ("infra",)
     assert captured[0][1] == [rid]
+
+
+def test_generate_passes_settings_rag_llm_max_tokens_to_llm(monkeypatch: pytest.MonkeyPatch) -> None:
+    rid = uuid4()
+    hits = [
+        SearchHit(
+            chunk_id=uuid4(),
+            raw_document_id=rid,
+            original_filename="a.txt",
+            chunk_no=1,
+            section_title=None,
+            page_no=None,
+            chunk_text="X",
+            access_scope="PUBLIC",
+            score=1.0,
+            highlights=None,
+        )
+    ]
+    llm = _RecordingLLM()
+    monkeypatch.setattr(nas_rag, "get_llm_client", lambda _s: llm)
+    settings = Settings(
+        llm_mock_mode=True,
+        search_backend="db",
+        rag_llm_max_tokens=777,
+        database_url="postgresql+psycopg://x/x",
+    )
+    body = ChatQueryRequest(question="q")
+    principal = PermissionPrincipal(user_id="stub-user", department_codes=())
+    session = MagicMock()
+    nas_rag.run_nas_rag_generate(session, settings, _FakeSearchClient(hits), principal, body)
+    assert llm.last_max_tokens == 777
+
+
+def test_selected_document_fallback_respects_context_chunk_cap(monkeypatch: pytest.MonkeyPatch) -> None:
+    captured: dict[str, int] = {}
+
+    def _capture(session, principal, document_ids, *, top_k):
+        _ = session, principal, document_ids
+        captured["top_k"] = top_k
+        return []
+
+    monkeypatch.setattr(nas_rag, "get_llm_client", lambda _s: MagicMock())
+    monkeypatch.setattr(nas_rag, "load_chunks_for_selected_documents", _capture)
+    rid = uuid4()
+    settings = Settings(
+        llm_mock_mode=True,
+        search_backend="db",
+        selected_document_context_chunks=5,
+        database_url="postgresql+psycopg://x/x",
+    )
+    body = ChatGenerateRequest(question="이 문서 요약", document_ids=[rid], top_k=50)
+    principal = PermissionPrincipal(user_id="stub-user", department_codes=())
+    session = MagicMock()
+    nas_rag.run_nas_rag_generate(session, settings, _FakeSearchClient([]), principal, body)
+    assert captured["top_k"] == 5
+
+
+def test_selected_document_fallback_top_k_below_cap_unchanged(monkeypatch: pytest.MonkeyPatch) -> None:
+    captured: dict[str, int] = {}
+
+    def _capture(session, principal, document_ids, *, top_k):
+        _ = session, principal, document_ids
+        captured["top_k"] = top_k
+        return []
+
+    monkeypatch.setattr(nas_rag, "get_llm_client", lambda _s: MagicMock())
+    monkeypatch.setattr(nas_rag, "load_chunks_for_selected_documents", _capture)
+    rid = uuid4()
+    settings = Settings(
+        llm_mock_mode=True,
+        search_backend="db",
+        selected_document_context_chunks=5,
+        database_url="postgresql+psycopg://x/x",
+    )
+    body = ChatGenerateRequest(question="q", document_ids=[rid], top_k=3)
+    principal = PermissionPrincipal(user_id="stub-user", department_codes=())
+    session = MagicMock()
+    nas_rag.run_nas_rag_generate(session, settings, _FakeSearchClient([]), principal, body)
+    assert captured["top_k"] == 3

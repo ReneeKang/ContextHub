@@ -31,7 +31,11 @@ NAS_RAG_SYSTEM_PROMPT = (
     "Answer using **only** that CONTEXT; if it is insufficient, say so clearly in Korean and do not invent facts. "
     "Do not infer privileged information beyond what the excerpts support. "
     "Cite ideas by excerpt index (e.g. '발췌 1') when helpful. "
-    "Respond in Korean unless the user explicitly asks otherwise."
+    "Respond in Korean unless the user explicitly asks otherwise. "
+    "Length and format: do not build tables (markdown/ASCII) unless the user clearly needs a table—prefer concise prose. "
+    "For bullet summaries, use at most 5–8 items; do not enumerate every file or line from the context. "
+    "Do not reproduce the full document outline; give the core answer only. "
+    "If a full detailed inventory is likely needed, briefly say the user can ask again for a deeper list."
 )
 
 
@@ -47,7 +51,8 @@ def build_nas_rag_user_prompt(*, question: str, hits: list[SearchHit]) -> str:
         parts.append("\n")
     parts.append(
         "\nUsing only the CONTEXT above, answer the QUESTION. "
-        "If nothing in the context applies, state that you found no relevant internal text."
+        "If nothing in the context applies, state that you found no relevant internal text. "
+        "Keep the reply concise unless the user explicitly asks for exhaustive detail."
     )
     return "".join(parts)
 
@@ -156,9 +161,12 @@ def run_nas_rag_generate(
     )
     hits = _apply_document_filter(raw_hits, doc_ids)
     used_selected_document_fallback = False
+    fallback_context_limit: int | None = None
     if doc_ids and not hits:
+        fb_limit = min(top_k, settings.selected_document_context_chunks)
+        fallback_context_limit = fb_limit
         fb = load_chunks_for_selected_documents(
-            session, principal, doc_ids, top_k=top_k
+            session, principal, doc_ids, top_k=fb_limit
         )
         if fb:
             hits = fb
@@ -176,7 +184,10 @@ def run_nas_rag_generate(
         retrieval_latency_ms=retrieval_ms,
     )
     if used_selected_document_fallback:
-        rec = {**rec, "selected_document_fallback_used": True}
+        extra: dict[str, object] = {"selected_document_fallback_used": True}
+        if fallback_context_limit is not None:
+            extra["selected_document_context_chunk_limit"] = fallback_context_limit
+        rec = {**rec, **extra}
     log_retrieval_debug(log, rec)
     dbg = (
         build_retrieval_debug_for_response(
@@ -239,7 +250,7 @@ def run_nas_rag_generate(
         result = llm.complete(
             messages=messages,
             model=settings.llm_model,
-            max_tokens=1024,
+            max_tokens=settings.rag_llm_max_tokens,
             temperature=0.2,
         )
     except Exception as exc:
