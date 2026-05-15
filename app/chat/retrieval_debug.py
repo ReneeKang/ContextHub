@@ -9,12 +9,123 @@ from __future__ import annotations
 
 import json
 import logging
+import re
+from collections import defaultdict
+from dataclasses import dataclass
 from typing import Any
+from uuid import UUID
 
 from app.adapters.search_protocol import SearchHit
 from app.chat.schemas import RetrievalDebugChunkItem, RetrievalDebugInfo
 
 _MAX_QUERY_LOG_LEN = 2000
+
+# OpenSearch payload uses ``<em>`` / ``</em>`` (see ``opensearch_payload.build_search_body``).
+_EM_RE = re.compile(r"<em>(.*?)</em>", re.IGNORECASE | re.DOTALL)
+_HIGHLIGHT_TERM_SPLIT_RE = re.compile(r"[\s,.;:|/\\]+")
+
+
+@dataclass(frozen=True, slots=True)
+class RetrievalChunkRanking:
+    """Per-hit ranking explanation (aligned with ``SearchClient.search`` result order)."""
+
+    chunk_rank: int
+    document_rank: int
+    matched_fields: list[str]
+    highlight_terms: list[str]
+
+
+def matched_fields_from_highlights(highlights: dict[str, list[str]] | None) -> list[str]:
+    """Stable-sorted OpenSearch highlight field names (keys of the highlight object)."""
+    if not highlights:
+        return []
+    return sorted(highlights.keys())
+
+
+def highlight_terms_from_highlights(
+    highlights: dict[str, list[str]] | None,
+    *,
+    max_terms: int = 48,
+    max_token_len: int = 64,
+) -> list[str]:
+    """
+    Extract short tokens from ``<em>...</em>`` spans inside highlight fragments.
+
+    Splits each span on common separators so comma-separated Korean phrases become separate terms.
+    Does **not** return raw fragments (only tagged spans, length-capped).
+    """
+    if not highlights:
+        return []
+    out: list[str] = []
+    seen: set[str] = set()
+    for fragments in highlights.values():
+        if not isinstance(fragments, list):
+            continue
+        for frag in fragments:
+            if not isinstance(frag, str):
+                continue
+            for m in _EM_RE.finditer(frag):
+                inner = (m.group(1) or "").strip()
+                if not inner:
+                    continue
+                for part in _HIGHLIGHT_TERM_SPLIT_RE.split(inner):
+                    p = part.strip()
+                    if not p:
+                        continue
+                    if len(p) > max_token_len:
+                        p = p[:max_token_len]
+                    if p not in seen:
+                        seen.add(p)
+                        out.append(p)
+                        if len(out) >= max_terms:
+                            return out
+    return out
+
+
+def _document_ranks_by_top_score(hits: list[SearchHit]) -> dict[UUID, int]:
+    """Rank documents by max chunk score among ``hits`` (1 = strongest document)."""
+    best: dict[UUID, float] = defaultdict(float)
+    for h in hits:
+        uid = h.raw_document_id
+        s = float(h.score)
+        if s > best[uid]:
+            best[uid] = s
+    ordered = sorted(best.keys(), key=lambda u: (-best[u], str(u)))
+    return {uid: i + 1 for i, uid in enumerate(ordered)}
+
+
+def rank_hits_for_retrieval_debug(hits: list[SearchHit]) -> list[RetrievalChunkRanking]:
+    """``chunk_rank`` = position in ``hits``; ``document_rank`` = rank of that chunk's doc by top score."""
+    doc_ranks = _document_ranks_by_top_score(hits)
+    out: list[RetrievalChunkRanking] = []
+    for i, h in enumerate(hits, start=1):
+        out.append(
+            RetrievalChunkRanking(
+                chunk_rank=i,
+                document_rank=doc_ranks[h.raw_document_id],
+                matched_fields=matched_fields_from_highlights(h.highlights),
+                highlight_terms=highlight_terms_from_highlights(h.highlights),
+            )
+        )
+    return out
+
+
+def _chunk_ranking_for_log(hits: list[SearchHit]) -> list[dict[str, Any]]:
+    """Safe log rows: scores + highlight-derived fields only (no raw highlight text blobs)."""
+    ranked = rank_hits_for_retrieval_debug(hits)
+    rows: list[dict[str, Any]] = []
+    for h, r in zip(hits, ranked, strict=True):
+        rows.append(
+            {
+                "chunk_id": str(h.chunk_id),
+                "score": float(h.score),
+                "matched_fields": r.matched_fields,
+                "highlight_terms": r.highlight_terms,
+                "document_rank": r.document_rank,
+                "chunk_rank": r.chunk_rank,
+            }
+        )
+    return rows
 
 
 def _truncate_query(q: str, *, max_len: int = _MAX_QUERY_LOG_LEN) -> str:
@@ -47,6 +158,7 @@ def build_retrieval_debug_log_record(
         "retrieval_scores": [float(h.score) for h in hits],
         "retrieval_filenames": [h.original_filename for h in hits],
         "retrieval_latency_ms": retrieval_latency_ms,
+        "chunk_ranking": _chunk_ranking_for_log(hits),
     }
 
 
@@ -70,6 +182,7 @@ def build_retrieval_debug_for_response(
 
     Uses the same trace fields as logs plus a ``chunks`` list (metadata only, no ``chunk_text``).
     """
+    ranked = rank_hits_for_retrieval_debug(hits)
     chunks = [
         RetrievalDebugChunkItem(
             chunk_id=h.chunk_id,
@@ -81,8 +194,12 @@ def build_retrieval_debug_for_response(
             score=h.score,
             access_scope=h.access_scope,
             highlights=h.highlights,
+            matched_fields=r.matched_fields,
+            highlight_terms=r.highlight_terms,
+            document_rank=r.document_rank,
+            chunk_rank=r.chunk_rank,
         )
-        for h in hits
+        for h, r in zip(hits, ranked, strict=True)
     ]
     return RetrievalDebugInfo(
         original_query=original_query.strip(),

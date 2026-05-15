@@ -30,12 +30,27 @@ NAS_RAG_SYSTEM_PROMPT = (
     "treat them as the only allowed factual ground for this request. "
     "Answer using **only** that CONTEXT; if it is insufficient, say so clearly in Korean and do not invent facts. "
     "Do not infer privileged information beyond what the excerpts support. "
-    "Cite ideas by excerpt index (e.g. '발췌 1') when helpful. "
-    "Respond in Korean unless the user explicitly asks otherwise. "
-    "Length and format: do not build tables (markdown/ASCII) unless the user clearly needs a table—prefer concise prose. "
-    "For bullet summaries, use at most 5–8 items; do not enumerate every file or line from the context. "
-    "Do not reproduce the full document outline; give the core answer only. "
-    "If a full detailed inventory is likely needed, briefly say the user can ask again for a deeper list."
+    "When citing evidence, use only a short marker like (발췌 N); keep source marks minimal. "
+    "Respond in Korean unless the user explicitly asks otherwise.\n\n"
+    "Default answer format (conservative — avoids truncation from over-long replies):\n"
+    "- Prefer a **short bullet summary** (plain lines or Markdown `-` bullets). Do **not** default to tabular layouts.\n"
+    "- **Unless the user explicitly asks you to present results as a table** (e.g. asks to lay them out in table form), "
+    "do **not** write **Markdown pipe tables** (`| ... |`) or ASCII table grids.\n"
+    "  (Korean reminder: 사용자가 '표로 정리해 달라'고 **명시**하지 않는 한 Markdown 표를 만들지 말 것.)\n"
+    "- **Do not cram many deliverables or list items into one bullet** (no long comma chains or mini-catalogs inside a single `-` line). "
+    "Split only when it stays within the bullet budget below; otherwise merge into **representative categories**.\n"
+    "  (Korean reminder: **한 bullet 안에** 산출물·항목을 길게 나열하지 말 것.)\n"
+    "- **Default body: at most 5 bullets** (not counting the closing summary lines). **Each bullet: 1–2 sentences only.**\n"
+    "  (Korean reminder: 기본 답변은 **최대 5개 bullet**, **각 bullet은 1~2문장**만.)\n"
+    "- For **deliverable / inventory-style** context, **do not enumerate every line item**; summarize **representative categories** only.\n"
+    "  (Korean reminder: 산출물·목록형 문서는 **모든 항목을 나열하지 말고 대표 범주만** 요약할 것.)\n"
+    "- If a **full detailed list** would be useful, add one short Korean line telling the user they may **ask again** for that depth "
+    "(e.g. that a detailed 산출물 목록 is available on re-request).\n"
+    "  (예: '상세 산출물 목록이 필요하면 다시 요청해 주세요.')\n"
+    "- **Always** end the answer with **one or two closing sentences** that restate the bottom line (no new facts beyond the context).\n"
+    "  (Korean reminder: 답변 마지막은 반드시 **한두 문장**으로 핵심을 다시 요약해 마무리할 것.)\n"
+    "- Skip exhaustive inventories unless the user explicitly asks for full detail.\n"
+    "- Keep the body concise; prefer quality over completeness in a single turn."
 )
 
 
@@ -52,7 +67,9 @@ def build_nas_rag_user_prompt(*, question: str, hits: list[SearchHit]) -> str:
     parts.append(
         "\nUsing only the CONTEXT above, answer the QUESTION. "
         "If nothing in the context applies, state that you found no relevant internal text. "
-        "Keep the reply concise unless the user explicitly asks for exhaustive detail."
+        "Prefer bullets over tables unless the user explicitly requested a table; "
+        "use at most 5 body bullets (1–2 sentences each), do not pack many items into one bullet; "
+        "keep the answer short enough to finish without truncation."
     )
     return "".join(parts)
 

@@ -60,6 +60,22 @@ class _RecordingLLM:
         return LLMCompletionResult(text="synthetic-answer", model="mock")
 
 
+def test_nas_rag_system_prompt_contains_table_and_brevity_rules() -> None:
+    p = nas_rag.NAS_RAG_SYSTEM_PROMPT
+    assert "Markdown" in p
+    assert "pipe tables" in p.lower() or "|" in p
+    assert "at most 5 bullets" in p.lower()
+    assert "1–2 sentences" in p or "1-2 sentences" in p.lower()
+    assert "한 bullet 안에" in p
+    assert "최대 5개" in p and "1~2문장" in p
+    assert "대표 범주" in p
+    assert "상세 산출물 목록이 필요하면 다시 요청" in p
+    assert "bullet" in p.lower()
+    assert "발췌" in p
+    assert "명시" in p and "표" in p
+    assert "한두" in p
+
+
 def test_query_log_snippet_truncates_long_question() -> None:
     from app.chat.retrieval_query import format_query_log_snippet
 

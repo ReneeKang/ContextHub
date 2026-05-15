@@ -113,7 +113,7 @@ class Settings(BaseSettings):
     #: When true, ``/query`` and ``/generate`` responses include a ``debug`` object with retrieval metadata.
     enable_retrieval_debug: bool = Field(default=False, alias="ENABLE_RETRIEVAL_DEBUG")
     #: Max completion tokens for ``POST /api/v1/chat/generate`` (NAS RAG); lower values shorten answers and reduce latency.
-    rag_llm_max_tokens: int = Field(default=800, ge=64, le=32000, alias="RAG_LLM_MAX_TOKENS")
+    rag_llm_max_tokens: int = Field(default=1000, ge=64, le=32000, alias="RAG_LLM_MAX_TOKENS")
     #: Max chunks loaded from DB when selected-document fallback runs (capped with request ``top_k``).
     selected_document_context_chunks: int = Field(default=5, ge=1, le=50, alias="SELECTED_DOCUMENT_CONTEXT_CHUNKS")
 

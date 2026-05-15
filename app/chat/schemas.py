@@ -66,6 +66,19 @@ class RetrievalDebugChunkItem(BaseModel):
     score: float
     access_scope: str
     highlights: dict[str, list[str]] | None = None
+    matched_fields: list[str] = Field(
+        default_factory=list,
+        description="OpenSearch highlight field keys present for this hit (sorted).",
+    )
+    highlight_terms: list[str] = Field(
+        default_factory=list,
+        description="Short tokens extracted from ``<em>...</em>`` spans inside highlight fragments.",
+    )
+    document_rank: int = Field(
+        ge=1,
+        description="Rank of this chunk's document by max chunk score among hits (1 = strongest).",
+    )
+    chunk_rank: int = Field(ge=1, description="1-based index of this chunk in the retrieval hit list.")
 
 
 class RetrievalDebugInfo(BaseModel):

@@ -121,12 +121,19 @@ def test_query_debug_enabled_includes_debug_and_log_has_retrieval_json(
     assert len(dbg["chunks"]) == 1
     assert dbg["chunks"][0]["chunk_no"] == 1
     assert "chunk_text" not in dbg["chunks"][0]
+    assert dbg["chunks"][0]["chunk_rank"] == 1
+    assert dbg["chunks"][0]["document_rank"] == 1
+    assert dbg["chunks"][0]["matched_fields"] == []
+    assert dbg["chunks"][0]["highlight_terms"] == []
 
     rd = [r.getMessage() for r in caplog.records if r.getMessage().startswith("retrieval_debug ")]
     assert rd
     payload = json.loads(rd[-1].split("retrieval_debug ", 1)[1])
     assert payload["retrieval_backend"] == "db"
     assert payload["retrieval_count"] == 1
+    assert len(payload["chunk_ranking"]) == 1
+    assert payload["chunk_ranking"][0]["chunk_rank"] == 1
+    assert payload["chunk_ranking"][0]["document_rank"] == 1
     assert "SECRET_BODY" not in rd[-1]
 
 
