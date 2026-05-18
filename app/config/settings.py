@@ -72,7 +72,11 @@ class Settings(BaseSettings):
         alias="OPENAI_COMPAT_BASE_URL",
         description="OpenAI-compatible API base, e.g. https://api.openai.com/v1 (no path suffix).",
     )
-    openai_compat_api_key: str | None = Field(default=None, alias="OPENAI_COMPAT_API_KEY")
+    openai_compat_api_key: str | None = Field(
+        default=None,
+        alias="OPENAI_COMPAT_API_KEY",
+        description="Bearer token for OpenAI-compatible servers. Leave unset or empty for local vLLM that does not require auth.",
+    )
     #: HTTP read timeout (seconds) for ``OpenAICompatLLMClient`` (``urllib.request.urlopen``).
     openai_compat_timeout_seconds: float = Field(default=120.0, alias="OPENAI_COMPAT_TIMEOUT_SECONDS")
     llm_model: str = Field(default="gpt-4o-mini", alias="LLM_MODEL")
@@ -117,6 +121,8 @@ class Settings(BaseSettings):
     enable_retrieval_debug: bool = Field(default=False, alias="ENABLE_RETRIEVAL_DEBUG")
     #: Max completion tokens for ``POST /api/v1/chat/generate`` (NAS RAG); lower values shorten answers and reduce latency.
     rag_llm_max_tokens: int = Field(default=1000, ge=64, le=32000, alias="RAG_LLM_MAX_TOKENS")
+    #: Sampling temperature for NAS RAG ``complete`` (OpenAI-compatible ``temperature`` field).
+    rag_llm_temperature: float = Field(default=0.2, ge=0.0, le=2.0, alias="RAG_LLM_TEMPERATURE")
     #: Max chunks loaded from DB when selected-document fallback runs (capped with request ``top_k``).
     selected_document_context_chunks: int = Field(default=5, ge=1, le=50, alias="SELECTED_DOCUMENT_CONTEXT_CHUNKS")
 

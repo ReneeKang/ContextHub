@@ -13,6 +13,7 @@
 | **Discover retrieval post-processing** | ✅ | chunk over-fetch → document grouping → 상대 점수·highlight 필터 (`discovery_service.py`) |
 | POC discover → select → generate 연결 | ✅ | `app/static/poc/` |
 | **Generate quality validation** | 🔄 **진행 중** | 선택 문서·sources·debug·답변 근거 일치 여부 운영 검증 |
+| **OpenAI-compatible 실 LLM (`LLM_MOCK_MODE=false`)** | ✅ (코드) | `OpenAICompatLLMClient` → `POST {base}/chat/completions`; `OPENAI_COMPAT_API_KEY` 생략 시 Bearer 미전송(vLLM 로컬 등). 스트리밍·에이전트는 미포함 |
 | Generate multi-document context 균형 | ⏳ 후보 | 선택 N건이어도 chunk `top_k`가 한 문서에 치우칠 수 있음 |
 
 **다음 작업:** POC/Swagger에서 `과업대비표` 시나리오로 문서 1건·3건 선택 후 `/generate` 검증. `.env`에 `ENABLE_RETRIEVAL_DEBUG=true` 권장(로컬).
@@ -83,7 +84,7 @@ question (원본, 사용자 입력)
 
 `POST /api/v1/chat/discover`는 검색 직후 `contexthub.chat.discovery` 로거로 `chat_discover {…}` 한 줄을 남긴다. 필드: `original_query`, `retrieval_query`, `normalization_applied`, `document_count`, `retrieved_document_ids`, `top_scores`, `retrieval_backend`, `retrieval_latency_ms`. 역시 **chunk 본문 로그 없음**.
 
-**응답 `debug` (선택):** `ENABLE_RETRIEVAL_DEBUG=true`(기본 `false`)일 때만 응답 JSON에 `debug` 객체를 붙인다(`RetrievalDebugInfo`: 동일 메타 + `chunks` 배열; 역시 전체 본문 없음). **`POST /generate`만** `debug.generation_context_chunks`에 LLM 프롬프트에 넣은 chunk의 `text_preview`(약 300자)를 추가한다. POC 우측 Retrieval debug 패널에서 확인.
+**응답 `debug` (선택):** `ENABLE_RETRIEVAL_DEBUG=true`(기본 `false`)일 때만 응답 JSON에 `debug` 객체를 붙인다(`RetrievalDebugInfo`: 동일 메타 + `chunks` 배열; 역시 전체 본문 없음). **`POST /generate`만** `debug.generation_context_chunks`에 LLM 프롬프트에 넣은 chunk의 `text_preview`(약 300자)를 추가한다. 히트가 있을 때는 같은 요청에서 실제 `chat/completions`로 보낸 user 메시지와 정렬되도록 `llm_system_message_char_count`, `llm_user_message_char_count`, `llm_user_message_preview`(QUESTION 블록 + CONTEXT 본문은 JSON에 넣지 않는다는 안내 문구; 발췌 미리보기는 `generation_context_chunks`)를 추가한다. POC 우측 Retrieval debug 패널에서 확인.
 
 **활용 예:** retrieval 품질·정규화 효과 분석, vector/hybrid 전환 전 BM25 기준선 검증, 운영 장애(0건·권한) 분석, hallucination과의 대조를 위한 **source 추적**, 감사 대응 시 “어떤 질의로 어떤 chunk_id가 매칭됐는지” 입증.
 
@@ -310,13 +311,27 @@ LLM_BACKEND=openai_compat
 OPENAI_COMPAT_BASE_URL=https://api.openai.com/v1
 OPENAI_COMPAT_API_KEY=sk-...
 LLM_MODEL=gpt-4o-mini
+RAG_LLM_MAX_TOKENS=1000
+RAG_LLM_TEMPERATURE=0.2
 OPENAI_COMPAT_TIMEOUT_SECONDS=120
 ```
 
 `OPENAI_COMPAT_BASE_URL`: 스킴 + 호스트 + `/v1`까지. `/chat/completions`는 클라이언트가 붙인다.
 `…/v1/chat/completions`까지 붙여 넣어도 `normalize_openai_compat_base_url()`이 정규화한다.
 
-설정 누락 시 `get_llm_client`가 `RuntimeError`, 라우터가 **503**으로 매핑한다. LLM 호출 실패는 **502** (`NasRagLLMError`).
+`OPENAI_COMPAT_API_KEY`: 공급자가 Bearer를 요구하면 설정한다. **비우거나 생략**하면 `Authorization` 헤더를 보내지 않는다(로컬 vLLM 등).
+
+로컬 vLLM 예:
+
+```env
+LLM_MOCK_MODE=false
+LLM_BACKEND=openai_compat
+OPENAI_COMPAT_BASE_URL=http://127.0.0.1:8000/v1
+# OPENAI_COMPAT_API_KEY 생략
+LLM_MODEL=meta-llama/Llama-3.1-8B-Instruct
+```
+
+`OPENAI_COMPAT_BASE_URL`만 필수다. 누락 시 `get_llm_client`가 `RuntimeError`, 라우터가 **503**으로 매핑한다. LLM HTTP/파싱 실패는 **502** (`NasRagLLMError`). 소켓 타임아웃은 `urllib`의 `socket.timeout`으로 전파되며 동일하게 502로 매핑된다.
 
 ### 사내 `internal_chat` 백엔드
 

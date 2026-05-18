@@ -24,6 +24,9 @@ from app.chat.schemas import (
 
 _MAX_QUERY_LOG_LEN = 2000
 GENERATION_CONTEXT_PREVIEW_MAX_CHARS = 300
+# User message in /generate debug: question + framing only; CONTEXT excerpt bodies are never included.
+LLM_USER_MESSAGE_DEBUG_PREVIEW_MAX_CHARS = 2000
+_LLM_USER_CONTEXT_MARKER = "\nCONTEXT (numbered excerpts):\n"
 
 # OpenSearch payload uses ``<em>`` / ``</em>`` (see ``opensearch_payload.build_search_body``).
 _EM_RE = re.compile(r"<em>(.*?)</em>", re.IGNORECASE | re.DOTALL)
@@ -217,12 +220,17 @@ def build_retrieval_debug_for_response(
     hits: list[SearchHit],
     retrieval_latency_ms: int,
     generation_context_chunks: list[GenerationContextChunkItem] | None = None,
+    llm_system_message: str | None = None,
+    llm_user_message: str | None = None,
 ) -> RetrievalDebugInfo:
     """
     Build the ``debug`` object for HTTP responses (when ``ENABLE_RETRIEVAL_DEBUG`` is on).
 
     Uses the same trace fields as logs plus a ``chunks`` list (metadata only, no ``chunk_text``).
     ``generation_context_chunks`` is set on ``/generate`` only (truncated prompt previews).
+    When ``llm_user_message`` is set (hits path after ``build_nas_rag_user_prompt``), adds character counts
+    and ``llm_user_message_preview``: the QUESTION block plus a placeholder line (CONTEXT excerpt bodies are never
+    embedded in JSON; use ``generation_context_chunks`` for per-chunk previews).
     """
     ranked = rank_hits_for_retrieval_debug(hits)
     chunks = [
@@ -243,6 +251,27 @@ def build_retrieval_debug_for_response(
         )
         for h, r in zip(hits, ranked, strict=True)
     ]
+    sys_chars = len(llm_system_message) if llm_system_message is not None else None
+    user_chars = len(llm_user_message) if llm_user_message is not None else None
+    user_preview: str | None = None
+    if llm_user_message is not None:
+        if _LLM_USER_CONTEXT_MARKER in llm_user_message:
+            head, _sep, tail = llm_user_message.partition(_LLM_USER_CONTEXT_MARKER)
+            ctx_chars = len(tail)
+            framed = (
+                f"{head.rstrip()}\n"
+                f"[… CONTEXT ({ctx_chars} chars of excerpts) omitted from debug JSON; "
+                "see generation_context_chunks previews …]"
+            )
+            user_preview = chunk_text_preview(
+                framed,
+                max_chars=LLM_USER_MESSAGE_DEBUG_PREVIEW_MAX_CHARS,
+            )
+        else:
+            user_preview = chunk_text_preview(
+                llm_user_message,
+                max_chars=LLM_USER_MESSAGE_DEBUG_PREVIEW_MAX_CHARS,
+            )
     return RetrievalDebugInfo(
         original_query=original_query.strip(),
         retrieval_query=retrieval_query.strip(),
@@ -257,4 +286,7 @@ def build_retrieval_debug_for_response(
         retrieval_filenames=[h.original_filename for h in hits],
         chunks=chunks,
         generation_context_chunks=generation_context_chunks,
+        llm_system_message_char_count=sys_chars,
+        llm_user_message_char_count=user_chars,
+        llm_user_message_preview=user_preview,
     )

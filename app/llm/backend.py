@@ -19,7 +19,7 @@ def get_llm_client(settings: Settings) -> LLMClient:
     * ``LLM_MOCK_MODE=false`` and ``LLM_BACKEND=internal_generate`` → :class:`InternalGenerateLLMClient`
       (requires ``INTERNAL_GENERATE_BASE_URL``).
     * ``LLM_MOCK_MODE=false`` and ``LLM_BACKEND=openai_compat`` → :class:`OpenAICompatLLMClient`
-      (requires ``OPENAI_COMPAT_BASE_URL`` and ``OPENAI_COMPAT_API_KEY``).
+      (requires ``OPENAI_COMPAT_BASE_URL``; ``OPENAI_COMPAT_API_KEY`` optional — omit ``Authorization`` when unset/empty for local vLLM).
     """
     if settings.llm_mock_mode:
         return MockLLMClient()
@@ -53,12 +53,11 @@ def get_llm_client(settings: Settings) -> LLMClient:
         )
     if settings.llm_backend == "openai_compat":
         base = (settings.openai_compat_base_url or "").strip()
-        key = settings.openai_compat_api_key or ""
-        if not base or not key:
+        if not base:
             raise RuntimeError(
-                "OPENAI_COMPAT_BASE_URL and OPENAI_COMPAT_API_KEY are required when "
-                "LLM_MOCK_MODE=false and LLM_BACKEND=openai_compat"
+                "OPENAI_COMPAT_BASE_URL is required when LLM_MOCK_MODE=false and LLM_BACKEND=openai_compat"
             )
+        key = (settings.openai_compat_api_key or "").strip() or None
         return OpenAICompatLLMClient(
             base_url=base,
             api_key=key,

@@ -11,6 +11,8 @@ import re
 from dataclasses import dataclass
 from typing import Any
 
+from app.unicode_normalize import normalize_nfc, normalize_nfc_optional
+
 # Tunables (keyword PoC; overlap helps boundary recall for future RAG)
 CHUNK_MAX_CHARS = 1200
 CHUNK_OVERLAP = 130
@@ -37,7 +39,9 @@ _SINGLE_ATX_LINE = re.compile(r"^#{1,6}\s+\S.*$")
 
 def extract_heading_title(first_line: str) -> str | None:
     m = _HEADING_LINE.match(first_line.strip())
-    return m.group(1).strip() if m else None
+    if not m:
+        return None
+    return normalize_nfc(m.group(1).strip())
 
 
 def estimate_token_count(text: str) -> int:
@@ -136,7 +140,7 @@ def split_leading_atx_headings(segment: str) -> tuple[list[str], str]:
         m = _HEADING_LINE.match(raw.strip())
         if not m:
             break
-        titles.append(m.group(1).strip())
+        titles.append(normalize_nfc(m.group(1).strip()))
         i += 1
         while i < len(lines) and not lines[i].strip():
             i += 1
@@ -177,7 +181,7 @@ def merge_adjacent_short_chunks(
             short_side = len(cur.text) < min_chars or len(nxt.text) < min_chars
             if same_ctx and short_side and combined <= max_merged_chars:
                 cur = ChunkPiece(
-                    text=cur.text + "\n\n" + nxt.text,
+                    text=normalize_nfc(cur.text + "\n\n" + nxt.text),
                     section_title=cur.section_title,
                     heading_path=cur.heading_path,
                     source_page=cur.source_page,
@@ -195,7 +199,7 @@ def section_title_for_segment(segment: str, *, fallback_filename: str | None) ->
     title = extract_heading_title(first_line)
     if title:
         return title
-    return fallback_filename
+    return normalize_nfc_optional(fallback_filename)
 
 
 def build_chunks_from_markdown(
@@ -238,7 +242,7 @@ def build_chunks_from_markdown(
             leaf = None
         base_title = leaf or section_title_for_segment(seg, fallback_filename=fallback_filename)
         if base_title is None and fallback_filename:
-            base_title = fallback_filename
+            base_title = normalize_nfc(fallback_filename)
 
         long_parts = split_long_segment(body, max_chars=max_chars, overlap=overlap)
         for i, part in enumerate(long_parts):
@@ -247,14 +251,14 @@ def build_chunks_from_markdown(
                 continue
             title = base_title
             if i > 0 and base_title:
-                title = f"{base_title} (continued)"
+                title = normalize_nfc(f"{base_title} (continued)")
             elif i > 0 and fallback_filename:
-                title = f"{fallback_filename} (continued)"
+                title = normalize_nfc(f"{fallback_filename} (continued)")
             raw_pieces.append(
                 ChunkPiece(
-                    text=part,
-                    section_title=title,
-                    heading_path=heading_path,
+                    text=normalize_nfc(part),
+                    section_title=normalize_nfc_optional(title),
+                    heading_path=normalize_nfc_optional(heading_path),
                     source_page=source_page,
                 )
             )

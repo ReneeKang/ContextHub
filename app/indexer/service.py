@@ -41,8 +41,8 @@ def _chunk_source_document(chunk: DocumentChunk, raw: RawDocument) -> dict[str, 
     """Payload aligned with `docs/search-index.md` (stub/OpenSearch field names)."""
     created: datetime | None = chunk.created_at
     meta = chunk.chunk_metadata_json if isinstance(chunk.chunk_metadata_json, dict) else None
-    tx = chunk.chunk_text or ""
-    char_n = chunk.chunk_char_count if chunk.chunk_char_count else len(tx)
+    tx = normalize_nfc(chunk.chunk_text or "")
+    char_n = len(tx)
     tok_n = chunk.chunk_token_estimate
     if not tok_n and tx:
         tok_n = max(1, (len(tx) + 3) // 4)
@@ -58,7 +58,7 @@ def _chunk_source_document(chunk: DocumentChunk, raw: RawDocument) -> dict[str, 
         "section_title": normalize_nfc_optional(chunk.section_title),
         "heading_path": normalize_nfc_optional(chunk.heading_path),
         "page_no": chunk.page_no,
-        "chunk_text": chunk.chunk_text,
+        "chunk_text": normalize_nfc(tx),
         "chunk_char_count": char_n,
         "chunk_token_estimate": int(tok_n or 0),
         "chunk_metadata_json": meta if meta is not None else {},

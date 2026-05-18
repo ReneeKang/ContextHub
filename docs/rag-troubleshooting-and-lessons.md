@@ -38,6 +38,8 @@ ContextHub RAG MVP를 실제로 구축하면서 부딪힌 문제들을
                                                                                        └→ [19] generation vs retrieval 품질 분리
                                                                                             └→ [20] 문서 버전 ranking 문제
                                                                                                  └→ [21] 운영형 RAG 교훈 정리
+                                                                                                      └→ [22] Mock generation → OpenAI-compatible 실연동
+                                                                                                           └→ [23] macOS 한글 파일명 NFC/NFD normalization
 ```
 
 ---
@@ -1120,6 +1122,108 @@ discover 후보가 정리되면 다음 병목은 **Generate quality validation**
   → /query(retrieval만)로 먼저 검색 품질 확인
   → 이후 /generate로 전체 품질 확인
 ```
+
+---
+
+## 22. Mock generation → OpenAI-compatible 실연동
+
+### 배경
+
+retrieval·sources·`ENABLE_RETRIEVAL_DEBUG`까지 붙인 뒤에도 `/generate`의 `answer`는 기본이 **MockLLMClient** 고정 응답이었다. 운영 검증을 하려면 **동일한 `build_nas_rag_user_prompt` 조립 결과**를 실제 `chat/completions`로 보내야 한다.
+
+### 조치
+
+- `LLM_MOCK_MODE=false`, `LLM_BACKEND=openai_compat`일 때 `OpenAICompatLLMClient`가 `POST {OPENAI_COMPAT_BASE_URL}/chat/completions`로 `messages`·`model`·`max_tokens`·`temperature`를 전송한다.
+- **API 키**: OpenAI·대부분의 호스티드 게이트웨이는 `Authorization: Bearer …`가 필요하다. 로컬 **vLLM** 등 인증이 없는 서버는 `OPENAI_COMPAT_API_KEY`를 비우면 헤더를 생략하도록 했다.
+- **타임아웃**: `OPENAI_COMPAT_TIMEOUT_SECONDS`(기본 120s)를 `urllib.request.urlopen`에 전달한다. 소켓 타임아웃은 `socket.timeout`으로 올라오며 라우터에서 다른 LLM 오류와 같이 사용자에게 502로 매핑된다.
+- **디버그 정합**: `llm_user_message_char_count`는 실제 API로 보낸 user 문자열 길이와 같다. `llm_user_message_preview`는 QUESTION 구간과 “CONTEXT 발췌는 JSON에 생략” 안내만 넣고, 발췌 본문은 `generation_context_chunks`의 짧은 `text_preview`로만 노출한다(긴 chunk가 HTTP 응답 전체를 오염시키지 않도록).
+- **샘플링**: `RAG_LLM_TEMPERATURE`로 NAS RAG 전용 temperature를 환경 변수로 조절한다(기본 0.2).
+
+### 실무 포인트
+
+- 먼저 `/query`로 retrieval이 기대대로인지 본 뒤, mock을 끄고 `/generate`만 바꿔 측정하면 **검색 품질과 생성 품질을 분리**해 디버깅할 수 있다.
+- 스트리밍·에이전트·멀티턴 메모리는 이 단계 범위 밖이다; 계약(`LLMClient.complete`)을 깨지 않고 한 번에 하나씩 확장하는 편이 안전하다.
+
+### 이후 연결된 과제
+
+- 스트리밍(SSE)·장문 답변 UX
+- 호출 실패 시 재시도·서킷 브레이커·모델 폴백
+
+---
+
+## 23. macOS 한글 파일명 Unicode Normalization (NFC/NFD) 문제
+
+### 증상
+
+Windows 환경에서는 `"과업대비표"` 검색 시 `ID_A01_과업대비표.xlsx`가 상위 결과로 정상 노출됐다.
+같은 코드·같은 매핑인데 macOS 개발 환경에서는 동일 문서가 검색되지 않거나 ranking이 비정상이었다.
+
+DB를 직접 들여다봐도 이상한 결과가 나왔다.
+
+```sql
+SELECT original_filename FROM raw_document
+WHERE original_filename LIKE '%과업대비표%';
+-- 0 rows
+
+SELECT original_filename FROM raw_document
+WHERE original_filename LIKE '%A01%';
+-- ID_A01_과업대비표.xlsx (정상)
+```
+
+같은 행을 `A01`로는 찾을 수 있는데 `과업대비표`로는 못 찾는다.
+ILIKE가 문자열 단위로 매칭하는데도 한글 부분만 미스매치였다.
+
+### 원인 분석
+
+`original_filename`에 저장된 문자열의 한글 자모가 **NFD(Normalization Form D)** 형태로 풀려 있었다.
+화면에는 "과업대비표"로 보이지만 내부 코드포인트는 자모가 분리된 시퀀스다.
+
+원인은 **macOS 파일시스템의 Unicode normalization 차이**다.
+
+- Windows / Linux ext4: 일반적으로 NFC (조합형 "과", `U+ACFC`)로 파일명을 보관
+- macOS HFS+/APFS: NFD (자모 분리 형태)로 파일명을 반환하는 경우가 있다
+
+scanner가 `os.listdir` / `Path.name`으로 받은 NFD 문자열을 그대로 `raw_document.original_filename`에 INSERT했고,
+indexer는 같은 값을 OpenSearch metadata 필드로 그대로 색인했다.
+즉 scanner → DB → OpenSearch까지 NFD 상태가 그대로 전파됐다.
+
+사용자가 입력창에서 IME로 친 "과업대비표"는 NFC다.
+**NFC 쿼리와 NFD 색인 값은 바이트 시퀀스가 달라 같은 문자열로 인식되지 않는다.**
+ILIKE도, Nori analyzer 토큰도 전부 미스매치였다.
+영문/숫자(`A01`)만 들어간 부분은 normalization 영향을 받지 않아 정상 동작했다.
+
+### 영향
+
+- `original_filename` / `inbox_path` boost(§10)가 실질적으로 무력화됨
+- `section_title`, `heading_path` 등 한글 metadata 모두 동일한 mismatch 발생
+- 같은 코드·같은 인덱스라도 **운영자의 OS에 따라** 결과가 달라지는 비결정성
+- 본문 chunk_text 안의 한글도 NFD로 새어들어가면 토크나이저 결과 자체가 달라짐
+
+### 조치 방향
+
+`unicodedata.normalize('NFC', s)`를 **들어오는 모든 경로**에 적용한다.
+
+```
+scanner    : original_filename, inbox_path, parent_path
+parser     : section_title, heading_path, markdown_text 추출 결과
+indexer    : OpenSearch로 보내는 metadata 필드 일괄 NFC
+query path : /discover, /query, /generate의 question을 retrieval 직전에 NFC
+```
+
+NFC normalize는 멱등이므로 이미 NFC인 입력에도 안전하다.
+적용 후에는 dev 인덱스 리셋 + `index_status` 전체 리셋으로 재색인이 필요하다 (§11과 동일 절차).
+
+### 실무 포인트
+
+- **RAG retrieval 품질 문제를 진단할 때, tokenizer/BM25/boost 튜닝 전에 metadata가 같은 normalization 형태로 들어와 있는지부터 확인해야 한다.** 코드포인트 단위 미스매치는 분석기로 복구할 수 없다.
+- RAG는 문서 본문뿐 아니라 **metadata retrieval 품질**도 중요하다. 파일명·경로·헤딩이 검색 단서가 되는 사내 문서 환경에서는 metadata가 깨지는 순간 §10에서 쌓은 boost 설계가 그대로 무력화된다.
+- macOS 개발 환경에서 색인한 데이터로 검색하면 멀쩡한 검색식도 0건이 나올 수 있다. **운영 환경(Linux)과 결과 차이가 크다면 OS 간 normalization 차이를 먼저 의심한다.**
+- 정책은 한 줄로 정리된다: **경계(boundary)에서 NFC로 정규화하고, 내부 코드는 NFC라고 신뢰한다.** 입력 경로 중 하나라도 normalize를 빠뜨리면 다른 경로로 NFD가 새어들어와 같은 증상이 재현된다.
+
+### 이후 연결된 문제
+
+OS별 normalization은 통일됐지만, 운영 환경에서는 **인덱스 마이그레이션 시점마다 normalize 정책이 일관되게 적용됐는지** 검증하는 절차가 필요해진다.
+색인 시기별로 정책이 달랐다면 같은 인덱스 안에서도 NFC/NFD가 섞여 잠재 mismatch가 남는다.
 
 ---
 

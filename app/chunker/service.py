@@ -16,6 +16,7 @@ from app.db.enums import ChunkIndexStatus, ChunkStatus, IngestStatus, ParseStatu
 from app.db.models.document_chunk import DocumentChunk
 from app.db.models.document_parse_result import DocumentParseResult
 from app.db.models.raw_document import RawDocument
+from app.unicode_normalize import normalize_nfc, normalize_nfc_optional
 
 
 log = logging.getLogger("contexthub.chunker")
@@ -144,15 +145,15 @@ class ChunkerService:
 
             meta = chunk_metadata_for_piece()
             for i, piece in enumerate(pieces, start=1):
-                text = piece.text
+                text = normalize_nfc(piece.text)
                 char_n = len(text)
                 self._session.add(
                     DocumentChunk(
                         raw_document_id=doc.raw_document_id,
                         chunk_no=i,
-                        section_title=piece.section_title,
+                        section_title=normalize_nfc_optional(piece.section_title),
                         page_no=piece.source_page,
-                        heading_path=piece.heading_path,
+                        heading_path=normalize_nfc_optional(piece.heading_path),
                         chunk_text=text,
                         chunk_char_count=char_n,
                         chunk_token_estimate=estimate_token_count(text),

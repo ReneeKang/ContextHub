@@ -217,7 +217,7 @@ def run_nas_rag_generate(
             top_k=top_k,
             hits=hits,
             retrieval_latency_ms=retrieval_ms,
-            generation_context_chunks=build_generation_context_chunks(hits) if hits else [],
+            generation_context_chunks=[],
         )
 
     if not hits:
@@ -257,6 +257,19 @@ def run_nas_rag_generate(
     llm_mock = bool(settings.llm_mock_mode or settings.llm_backend == "mock")
     llm = get_llm_client(settings)
     user_content = build_nas_rag_user_prompt(question=body.question, hits=hits)
+    if settings.enable_retrieval_debug:
+        dbg = build_retrieval_debug_for_response(
+            original_query=original_q,
+            retrieval_query=retrieval_q,
+            normalization_applied=norm_applied,
+            retrieval_backend=rb,
+            top_k=top_k,
+            hits=hits,
+            retrieval_latency_ms=retrieval_ms,
+            generation_context_chunks=build_generation_context_chunks(hits),
+            llm_system_message=NAS_RAG_SYSTEM_PROMPT,
+            llm_user_message=user_content,
+        )
     messages = [
         LLMMessage(role="system", content=NAS_RAG_SYSTEM_PROMPT),
         LLMMessage(role="user", content=user_content),
@@ -268,7 +281,7 @@ def run_nas_rag_generate(
             messages=messages,
             model=settings.llm_model,
             max_tokens=settings.rag_llm_max_tokens,
-            temperature=0.2,
+            temperature=settings.rag_llm_temperature,
         )
     except Exception as exc:
         err_msg = str(exc).replace("\n", " ")[:500]

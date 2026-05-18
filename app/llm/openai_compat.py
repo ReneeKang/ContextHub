@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import logging
+import socket
 import urllib.error
 import urllib.request
 from typing import Any
@@ -32,9 +33,9 @@ class OpenAICompatLLMClient:
     ``base_url`` should be like ``https://api.openai.com/v1`` (no trailing slash required).
     """
 
-    def __init__(self, *, base_url: str, api_key: str, timeout_s: float = 120.0) -> None:
+    def __init__(self, *, base_url: str, api_key: str | None = None, timeout_s: float = 120.0) -> None:
         self._base = normalize_openai_compat_base_url(base_url)
-        self._api_key = api_key
+        self._api_key = (api_key or "").strip()
         self._timeout_s = timeout_s
 
     def complete(
@@ -53,18 +54,21 @@ class OpenAICompatLLMClient:
             "temperature": temperature,
         }
         body = json.dumps(payload).encode("utf-8")
-        req = urllib.request.Request(
-            url,
-            data=body,
-            method="POST",
-            headers={
-                "Content-Type": "application/json",
-                "Authorization": f"Bearer {self._api_key}",
-            },
-        )
+        headers: dict[str, str] = {"Content-Type": "application/json"}
+        if self._api_key:
+            headers["Authorization"] = f"Bearer {self._api_key}"
+        req = urllib.request.Request(url, data=body, method="POST", headers=headers)
         try:
             with urllib.request.urlopen(req, timeout=self._timeout_s) as resp:
                 raw = resp.read().decode("utf-8")
+        except socket.timeout as exc:
+            log.warning(
+                "openai_compat timeout error_type=socket.timeout error_message=%s url=%s timeout_s=%s",
+                str(exc)[:300],
+                url,
+                self._timeout_s,
+            )
+            raise
         except urllib.error.HTTPError as exc:
             detail = exc.read().decode("utf-8", errors="replace")[:500]
             log.warning(

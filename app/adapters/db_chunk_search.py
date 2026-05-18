@@ -21,6 +21,7 @@ from app.adapters.search_protocol import PermissionPrincipal, SearchClient, Sear
 from app.db.enums import AccessScope, ChunkIndexStatus, IngestStatus
 from app.db.models.document_chunk import DocumentChunk
 from app.db.models.raw_document import RawDocument
+from app.unicode_normalize import normalize_nfc
 
 
 log = logging.getLogger("contexthub.db_chunk_search")
@@ -79,7 +80,8 @@ class DbChunkSearchClient(SearchClient):
         index_name: str,
     ) -> list[SearchHit]:
         _ = index_name  # reserved for index routing when OpenSearch exists
-        terms = _tokenize_question(query)
+        # Defense-in-depth: callers usually pass NFC from retrieval_query; align ILIKE with DB NFC.
+        terms = _tokenize_question(normalize_nfc((query or "").strip()))
         if not terms:
             log.info("empty search query after tokenize; returning no hits")
             return []

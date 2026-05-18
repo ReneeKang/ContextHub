@@ -108,6 +108,16 @@ class ScannerService:
             )
             if existing_doc is not None:
                 stats.already_registered += 1
+                # Heal legacy rows (e.g. Mac NFD before scanner NFC) so DB matches NFC search/ILIKE.
+                nfc_name = normalize_nfc(path.name)
+                nfc_rel = normalize_nfc(path.relative_to(inbox).as_posix())
+                if existing_doc.original_filename != nfc_name or existing_doc.inbox_path != nfc_rel:
+                    existing_doc.original_filename = nfc_name
+                    existing_doc.inbox_path = nfc_rel
+                    log.info(
+                        "normalized raw_document to NFC (filename/path) raw_document_id=%s",
+                        existing_doc.raw_document_id,
+                    )
                 continue
 
             try:

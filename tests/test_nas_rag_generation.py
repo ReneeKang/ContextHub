@@ -171,6 +171,145 @@ def test_get_llm_client_passes_timeout_to_openai_compat() -> None:
         ctor.assert_called_once_with(base_url="https://api.openai.com/v1", api_key="secret-key", timeout_s=42.5)
 
 
+def test_get_llm_client_openai_compat_allows_missing_api_key() -> None:
+    from app.llm import backend as llm_backend
+    from app.llm.openai_compat import OpenAICompatLLMClient
+
+    settings = Settings(
+        llm_mock_mode=False,
+        llm_backend="openai_compat",
+        openai_compat_base_url="http://127.0.0.1:9999/v1",
+        openai_compat_api_key=None,
+        search_backend="db",
+    )
+    client = llm_backend.get_llm_client(settings)
+    assert isinstance(client, OpenAICompatLLMClient)
+
+
+def test_openai_compat_omits_authorization_when_api_key_empty(monkeypatch: pytest.MonkeyPatch) -> None:
+    import json as json_mod
+
+    from app.llm.openai_compat import OpenAICompatLLMClient
+    from app.llm.protocol import LLMMessage
+
+    captured: list[object] = []
+
+    class _Resp:
+        def __enter__(self) -> "_Resp":
+            return self
+
+        def __exit__(self, *args: object) -> bool:
+            return False
+
+        def read(self) -> bytes:
+            return json_mod.dumps(
+                {"choices": [{"message": {"content": "ok"}}], "model": "m"}
+            ).encode("utf-8")
+
+    def _urlopen(req: object, timeout: object = None) -> _Resp:
+        _ = timeout
+        captured.append(req)
+        return _Resp()
+
+    monkeypatch.setattr("app.llm.openai_compat.urllib.request.urlopen", _urlopen)
+    llm = OpenAICompatLLMClient(base_url="http://127.0.0.1:8000/v1", api_key="")
+    out = llm.complete(messages=[LLMMessage(role="user", content="hi")], model="x")
+    assert out.text == "ok"
+    req = captured[0]
+    assert getattr(req, "get_header", lambda _k: None)("Authorization") is None
+
+
+def test_openai_compat_sends_bearer_when_api_key_set(monkeypatch: pytest.MonkeyPatch) -> None:
+    import json as json_mod
+
+    from app.llm.openai_compat import OpenAICompatLLMClient
+    from app.llm.protocol import LLMMessage
+
+    captured: list[object] = []
+
+    class _Resp:
+        def __enter__(self) -> "_Resp":
+            return self
+
+        def __exit__(self, *args: object) -> bool:
+            return False
+
+        def read(self) -> bytes:
+            return json_mod.dumps(
+                {"choices": [{"message": {"content": "x"}}], "model": "m"}
+            ).encode("utf-8")
+
+    def _urlopen(req: object, timeout: object = None) -> _Resp:
+        _ = timeout
+        captured.append(req)
+        return _Resp()
+
+    monkeypatch.setattr("app.llm.openai_compat.urllib.request.urlopen", _urlopen)
+    llm = OpenAICompatLLMClient(base_url="http://127.0.0.1:8000/v1", api_key=" sk-test ")
+    llm.complete(messages=[LLMMessage(role="user", content="hi")], model="x")
+    req = captured[0]
+    assert getattr(req, "get_header", lambda _k: None)("Authorization") == "Bearer sk-test"
+
+
+def test_openai_compat_socket_timeout_propagates(monkeypatch: pytest.MonkeyPatch) -> None:
+    import socket
+
+    from app.llm.openai_compat import OpenAICompatLLMClient
+    from app.llm.protocol import LLMMessage
+
+    def _urlopen(_req: object, timeout: object = None) -> None:
+        _ = timeout
+        raise socket.timeout()
+
+    monkeypatch.setattr("app.llm.openai_compat.urllib.request.urlopen", _urlopen)
+    llm = OpenAICompatLLMClient(base_url="http://127.0.0.1:8000/v1", api_key=None)
+    with pytest.raises(socket.timeout):
+        llm.complete(messages=[LLMMessage(role="user", content="hi")], model="x")
+
+
+def test_nas_rag_passes_rag_llm_temperature(monkeypatch: pytest.MonkeyPatch) -> None:
+    class _Rec:
+        def __init__(self) -> None:
+            self.last_temperature: float | None = None
+
+        def complete(
+            self,
+            *,
+            messages: list[LLMMessage],
+            model: str,
+            max_tokens: int = 1024,
+            temperature: float = 0.2,
+        ) -> LLMCompletionResult:
+            self.last_temperature = temperature
+            return LLMCompletionResult(text="t", model="mock")
+
+    rec = _Rec()
+    monkeypatch.setattr(nas_rag, "get_llm_client", lambda _s: rec)
+    hits = [
+        SearchHit(
+            chunk_id=uuid4(),
+            raw_document_id=uuid4(),
+            original_filename="a.txt",
+            chunk_no=1,
+            section_title=None,
+            page_no=None,
+            chunk_text="c",
+            access_scope="PUBLIC",
+            score=1.0,
+            highlights=None,
+        )
+    ]
+    settings = Settings(
+        llm_mock_mode=True,
+        search_backend="db",
+        rag_llm_temperature=0.77,
+    )
+    body = ChatQueryRequest(question="q")
+    principal = PermissionPrincipal(user_id="u", department_codes=())
+    nas_rag.run_nas_rag_generate(MagicMock(), settings, _FakeSearchClient(hits), principal, body)
+    assert rec.last_temperature == 0.77
+
+
 def test_llm_failure_logs_error_type_and_message(monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture) -> None:
     caplog.set_level(logging.WARNING)
     hits = [

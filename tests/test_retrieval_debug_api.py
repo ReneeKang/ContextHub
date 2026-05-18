@@ -171,13 +171,19 @@ def test_generate_debug_enabled(monkeypatch: pytest.MonkeyPatch) -> None:
     resp = client.post("/api/v1/chat/generate", json={"question": "q1", "top_k": 5})
     assert resp.status_code == 200
     data = resp.json()
-    assert data["debug"]["retrieval_query"] == "q1"
-    assert data["debug"]["retrieval_count"] == 1
-    ctx = data["debug"]["generation_context_chunks"]
+    dbg = data["debug"]
+    assert dbg["retrieval_query"] == "q1"
+    assert dbg["retrieval_count"] == 1
+    ctx = dbg["generation_context_chunks"]
     assert len(ctx) == 1
     assert ctx[0]["included_in_prompt"] is True
     assert ctx[0]["text_preview"] == "SECRET_BODY"
     assert "chunk_text" not in ctx[0]
+    assert dbg["llm_user_message_char_count"] > len("q1")
+    assert dbg["llm_system_message_char_count"] == len(nas_rag_mod.NAS_RAG_SYSTEM_PROMPT)
+    assert "QUESTION:" in dbg["llm_user_message_preview"]
+    assert dbg["llm_user_message_preview"].startswith("QUESTION:")
+    assert "omitted from debug JSON" in dbg["llm_user_message_preview"]
 
 
 class _SearchLongBody(SearchClient):

@@ -117,12 +117,34 @@ class RetrievalDebugInfo(BaseModel):
         default=None,
         description="``/generate`` only: truncated previews of chunks sent to the LLM (when debug enabled).",
     )
+    llm_system_message_char_count: int | None = Field(
+        default=None,
+        description="``/generate`` with hits: length of system message sent to the LLM (same as ``NAS_RAG_SYSTEM_PROMPT``).",
+    )
+    llm_user_message_char_count: int | None = Field(
+        default=None,
+        description="``/generate`` with hits: length of user message (output of ``build_nas_rag_user_prompt``).",
+    )
+    llm_user_message_preview: str | None = Field(
+        default=None,
+        description=(
+            "QUESTION block + note that CONTEXT was attached; excerpt bodies are never included "
+            "(use ``generation_context_chunks`` for truncated per-chunk text)."
+        ),
+    )
 
     @model_serializer(mode="wrap")
     def _serialize_omit_null_generation_context(self, serializer):
         data = serializer(self)
         if data.get("generation_context_chunks") is None:
             data.pop("generation_context_chunks", None)
+        for k in (
+            "llm_system_message_char_count",
+            "llm_user_message_char_count",
+            "llm_user_message_preview",
+        ):
+            if data.get(k) is None:
+                data.pop(k, None)
         return data
 
 

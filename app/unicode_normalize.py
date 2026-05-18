@@ -3,6 +3,10 @@ Unicode NFC normalization for cross-platform Korean text and paths.
 
 macOS (HFS+/APFS) often surfaces filenames as NFD; Windows/Linux typically NFC.
 Normalizing to NFC at storage and query time keeps ``ILIKE`` / keyword search aligned.
+
+Applied at: scanner (new + existing row heal), chunker/markdown_chunk (chunk rows),
+indexer (OpenSearch payload, including ``chunk_text``), ``DbChunkSearchClient`` query,
+and retrieval/OpenSearch query builders (NFC query string).
 """
 
 from __future__ import annotations

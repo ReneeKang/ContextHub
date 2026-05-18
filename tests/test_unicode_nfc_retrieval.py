@@ -45,7 +45,7 @@ def test_chunk_index_payload_normalizes_fields() -> None:
     chunk.section_title = unicodedata.normalize("NFD", "표 제목")
     chunk.heading_path = unicodedata.normalize("NFD", "1장/개요")
     chunk.page_no = None
-    chunk.chunk_text = "body"
+    chunk.chunk_text = unicodedata.normalize("NFD", "본문내용")
     chunk.chunk_char_count = 4
     chunk.chunk_token_estimate = 1
     chunk.chunk_metadata_json = {}
@@ -60,6 +60,8 @@ def test_chunk_index_payload_normalizes_fields() -> None:
     assert doc["inbox_path"] == normalize_nfc(raw.inbox_path.replace("\\", "/"))
     assert doc["section_title"] == normalize_nfc(chunk.section_title)
     assert doc["heading_path"] == normalize_nfc(chunk.heading_path)
+    assert doc["chunk_text"] == normalize_nfc(chunk.chunk_text)
+    assert doc["chunk_char_count"] == len(doc["chunk_text"])
 
 
 def test_opensearch_body_query_is_nfc() -> None:
@@ -75,3 +77,26 @@ def test_opensearch_body_query_is_nfc() -> None:
     )
     inner = body["query"]["bool"]["should"][0]["multi_match"]["query"]
     assert inner == unicodedata.normalize("NFC", "과업대비표")
+
+
+def test_db_chunk_search_normalizes_query_before_tokenize() -> None:
+    """ILIKE tokens use NFC so Mac NFD DB rows match after scanner/indexer healing."""
+    from app.adapters.db_chunk_search import _tokenize_question
+
+    q_nfd = unicodedata.normalize("NFD", "과업대비표")
+    terms = _tokenize_question(normalize_nfc(q_nfd.strip()))
+    assert terms == ["과업대비표"]
+
+
+def test_markdown_chunk_piece_fields_are_nfc() -> None:
+    from app.chunker.markdown_chunk import build_chunks_from_markdown
+
+    nfd_heading = unicodedata.normalize("NFD", "과업개요")
+    md = f"# {nfd_heading}\n\n본문입니다."
+    nfd_fn = unicodedata.normalize("NFD", "과업대비표.xlsx")
+    pieces = build_chunks_from_markdown(md, fallback_filename=nfd_fn)
+    assert len(pieces) >= 1
+    p0 = pieces[0]
+    assert p0.section_title == unicodedata.normalize("NFC", nfd_heading)
+    assert p0.heading_path == unicodedata.normalize("NFC", nfd_heading)
+    assert p0.text == unicodedata.normalize("NFC", "본문입니다.")
